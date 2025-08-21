@@ -1,0 +1,8 @@
+"0","ptal_data_list <- list(ptal_2007 = ptal_2007,
+  ptal_2015 = ptal_2015                     
+  ptal_2010 = ptal_2010,
+"
+"2","Error: unexpected symbol in:
+""  ptal_2015 = ptal_2015                     
+  ptal_2010""
+"

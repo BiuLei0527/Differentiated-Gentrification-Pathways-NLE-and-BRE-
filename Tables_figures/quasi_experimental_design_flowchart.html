@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<style>
+body {
+    background-color: white;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 20px;
+    line-height: 1.4;
+}
+
+.container {
+    width: 100%;
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+.main-title {
+    font-size: 22pt;
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 30px;
+    color: #2c3e50;
+    border-bottom: 3px solid #3498db;
+    padding-bottom: 15px;
+}
+
+.stage-container {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+}
+
+.stage {
+    border: 2px solid #34495e;
+    border-radius: 15px;
+    padding: 25px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    position: relative;
+}
+
+.stage-header {
+    background: #34495e;
+    color: white;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 16pt;
+    font-weight: bold;
+    margin: -25px -25px 20px -25px;
+    text-align: center;
+}
+
+.matching-strategies {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 25px;
+    margin-top: 20px;
+}
+
+.strategy-card {
+    border: 2px solid;
+    border-radius: 12px;
+    padding: 20px;
+    background: white;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.strategy-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+}
+
+.strategy-1 {
+    border-color: #e74c3c;
+    background: linear-gradient(135deg, #fff5f5 0%, #ffebee 100%);
+}
+
+.strategy-2 {
+    border-color: #f39c12;
+    background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+}
+
+.strategy-3 {
+    border-color: #27ae60;
+    background: linear-gradient(135deg, #f1f8e9 0%, #dcedc8 100%);
+}
+
+.strategy-title {
+    font-size: 14pt;
+    font-weight: bold;
+    margin-bottom: 15px;
+    text-align: center;
+    padding: 10px;
+    border-radius: 8px;
+    color: white;
+}
+
+.strategy-1 .strategy-title {
+    background: #e74c3c;
+}
+
+.strategy-2 .strategy-title {
+    background: #f39c12;
+}
+
+.strategy-3 .strategy-title {
+    background: #27ae60;
+}
+
+.step-content {
+    font-size: 11pt;
+    color: #2c3e50;
+}
+
+.step-list {
+    list-style: none;
+    padding-left: 0;
+    margin: 10px 0;
+}
+
+.step-list li {
+    padding: 5px 0;
+    position: relative;
+    padding-left: 20px;
+}
+
+.step-list li::before {
+    content: "▶";
+    color: #3498db;
+    font-weight: bold;
+    position: absolute;
+    left: 0;
+}
+
+.variables-box {
+    background: #ecf0f1;
+    border: 1px solid #bdc3c7;
+    padding: 12px;
+    border-radius: 6px;
+    margin: 10px 0;
+}
+
+.strategy-flow {
+    background: #34495e;
+    color: white;
+    padding: 12px;
+    border-radius: 6px;
+    margin: 10px 0;
+    font-family: 'Courier New', monospace;
+    font-size: 10pt;
+}
+
+.criteria-box {
+    border-left: 4px solid;
+    padding: 12px;
+    margin: 10px 0;
+    border-radius: 4px;
+}
+
+.strategy-1 .criteria-box {
+    border-color: #e74c3c;
+    background: rgba(231, 76, 60, 0.1);
+}
+
+.strategy-2 .criteria-box {
+    border-color: #f39c12;
+    background: rgba(243, 156, 18, 0.1);
+}
+
+.strategy-3 .criteria-box {
+    border-color: #27ae60;
+    background: rgba(39, 174, 96, 0.1);
+}
+
+.flow-arrow {
+    text-align: center;
+    font-size: 28pt;
+    color: #3498db;
+    margin: 20px 0;
+    font-weight: bold;
+}
+
+.integration-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.integration-box {
+    border: 1px solid #bdc3c7;
+    border-radius: 10px;
+    padding: 20px;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.integration-title {
+    font-size: 14pt;
+    font-weight: bold;
+    color: #2980b9;
+    margin-bottom: 15px;
+    border-bottom: 2px solid #3498db;
+    padding-bottom: 8px;
+}
+
+.highlight-box {
+    background: #e8f6f3;
+    border-left: 4px solid #16a085;
+    padding: 15px;
+    margin: 15px 0;
+    border-radius: 5px;
+}
+
+.assessment-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.assessment-box {
+    background: white;
+    border: 1px solid #bdc3c7;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.assessment-title {
+    font-size: 13pt;
+    font-weight: bold;
+    color: #8e44ad;
+    margin-bottom: 12px;
+    text-align: center;
+}
+
+.quality-metrics {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 25px;
+    border-radius: 15px;
+    margin-top: 30px;
+}
+
+.metrics-title {
+    font-size: 16pt;
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.metric-item {
+    background: rgba(255,255,255,0.2);
+    padding: 15px;
+    border-radius: 10px;
+    text-align: center;
+}
+
+.metric-value {
+    font-size: 16pt;
+    font-weight: bold;
+    display: block;
+}
+
+.metric-label {
+    font-size: 10pt;
+    opacity: 0.9;
+}
+
+.special-note {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 15px 0;
+    border-left: 4px solid #fdcb6e;
+}
+
+.recommendation-box {
+    background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%);
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    margin: 10px 0;
+    text-align: center;
+    font-weight: bold;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+    <div class="main-title">
+        Stage 2: Quasi-Experimental Design - Advanced Propensity Score Matching Framework
+    </div>
+    
+    <div class="stage-container">
+        <!-- Stage 2.1: Data Integration -->
+        <div class="stage">
+            <div class="stage-header">2.1 Auxiliary Data Integration</div>
+            
+            <div class="integration-grid">
+                <div class="integration-box">
+                    <div class="integration-title">PTAL Data</div>
+                    <div class="highlight-box">
+                        <strong>Public Transport Accessibility Level</strong>
+                        <ul class="step-list">
+                            <li>Years: 2005, 2007, 2010, 2012, 2014, 2015, 2019, 2020, 2023</li>
+                            <li>9-category classification system</li>
+                            <li>Long-term trend calculation</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="integration-box">
+                    <div class="integration-title">IMD Data</div>
+                    <div class="highlight-box">
+                        <strong>Index of Multiple Deprivation</strong>
+                        <ul class="step-list">
+                            <li>Years: 2004, 2007, 2010, 2015, 2019</li>
+                            <li>LSOA-level deprivation scores</li>
+                            <li>Multi-domain composite indices</li>
+                            <li>Temporal trend analysis</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="integration-box">
+                    <div class="integration-title">Station Location Data</div>
+                    <div class="highlight-box">
+                        <strong>Spatial Distance Matrices</strong>
+                        <ul class="step-list">
+                            <li>NLE & BRE station coordinates</li>
+                            <li>Euclidean distance calculation</li>
+                            <li>Minimum distance to treatment</li>
+                            <li>Geographic buffer definitions</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="flow-arrow">↓</div>
+        
+        <!-- Stage 2.2: Three Matching Strategies -->
+        <div class="stage">
+            <div class="stage-header">2.2 Propensity Score Matching - Three Strategic Approaches</div>
+            
+            <div class="matching-strategies">
+                <!-- Strategy 1: Small Sample Design -->
+                <div class="strategy-card strategy-1">
+                    <div class="strategy-title">🎯 Strategy 1: Small Sample Design</div>
+                    
+                    <div class="variables-box">
+                        <strong>Variables:</strong><br/>
+                        • PTAL trends (2005-2015, 10-year span)<br/>
+                        • IMD trends (2004-2015, 11-year span)<br/>
+                        • Log baseline population
+                    </div>
+                    
+                    <div class="strategy-flow">
+4-Layer Progressive Matching:
+1. Full Model PSM
+2. Simplified Model PSM  
+3. Minimal Model PSM
+4. Direct Similarity Matching + Weighted Euclidean Distance
+                    </div>
+                    
+                    <div class="criteria-box">
+                        <strong>Distance:</strong> 2-5km<br/>
+                        <strong>Balance Check:</strong>
+                        <ul class="step-list">
+                            <li>SMD < 0.25: Acceptable</li>
+                            <li>SMD > 0.5: Switch to exact matching</li>
+                            <li>Auto re-matching if quality insufficient</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="special-note">
+                        <strong>Single Treatment Unit (n=1):</strong><br/>
+                        Recommend Synthetic Control Method (SCM)
+                    </div>
+                    
+                    <div class="special-note">
+                        <em>Note: Both projects show poor results with this approach</em>
+                    </div>
+                </div>
+                
+                <!-- Strategy 2: Complex Trends -->
+                <div class="strategy-card strategy-2">
+                    <div class="strategy-title">🔬 Strategy 2: Complex Trends</div>
+                    
+                    <div class="variables-box">
+                        <strong>Variables:</strong><br/>
+                        • IMD + PTAL + Population<br/>
+                        • Three trend variables<br/>
+                        • Baseline house price data
+                    </div>
+                    
+                    <div class="strategy-flow">
+4-Layer Progressive Matching:
+1. Full Trends + Baseline PSM
+2. Simplified Trends PSM + Relaxed Caliper
+3. Mahalanobis Trends Distance + Correlation
+4. Direct Trends Selection
+                    </div>
+                    
+                    <div class="criteria-box">
+                        <strong>Distance:</strong> 1.5-8km<br/>
+                        <strong>Design Philosophy:</strong><br/>
+                        Information maximization with all available variables
+                    </div>
+                    
+                    <div class="criteria-box">
+                        <strong>Balance Assessment:</strong>
+                        <ul class="step-list">
+                            <li>Excellent: SMD < 0.1 ✅</li>
+                            <li>Good: SMD < 0.15 ✅</li>
+                            <li>Acceptable: SMD < 0.25 ⚠️</li>
+                            <li>Poor: SMD ≥ 0.25 ❌</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="special-note">
+                        <em>Note: BRE results suboptimal with this approach</em>
+                    </div>
+                </div>
+                
+                <!-- Strategy 3: Simplified Robust -->
+                <div class="strategy-card strategy-3">
+                    <div class="strategy-title">🎯 Strategy 3: Simplified Robust</div>
+                    
+                    <div class="variables-box">
+                        <strong>Variables:</strong><br/>
+                        • IMD + PTAL (baseline only)<br/>
+                        • Minimal variable set for stability
+                    </div>
+                    
+                    <div class="strategy-flow">
+5-Layer Progressive Matching:
+1. PSM (Standard)
+2. Relaxed PSM 
+3. Mahalanobis Distance
+4. Exact Matching
+5. Direct Selection
+                    </div>
+                    
+                    <div class="criteria-box">
+                        <strong>Distance:</strong> 1.5-8km<br/>
+                        <strong>Design Philosophy:</strong><br/>
+                        Robustness priority, ensure matching success<br/>
+                        <em>(Both projects show good results)</em>
+                    </div>
+                    
+                    <div class="criteria-box">
+                        <strong>Assessment Standards:</strong>
+                        <ul class="step-list">
+                            <li>SMD < 0.1: Excellent ✅</li>
+                            <li>SMD < 0.25: Good ⚠️</li>
+                            <li>SMD ≥ 0.25: Poor ❌</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="recommendation-box">
+                        RECOMMENDED APPROACH<br/>
+                        (Optimal performance for both projects)
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="flow-arrow">↓</div>
+        
+        <!-- Stage 2.3: Quality Assessment -->
+        <div class="stage">
+            <div class="stage-header">2.3 Matching Quality Assessment Framework</div>
+            
+            <div class="assessment-grid">
+                <div class="assessment-box">
+                    <div class="assessment-title">Standardized Mean Differences (SMD)</div>
+                    <div class="highlight-box">
+                        <strong>Calculation:</strong><br/>
+                        SMD = |Mean_treat - Mean_control| / Pooled_SD
+                        <ul class="step-list">
+                            <li>Primary balance metric</li>
+                            <li>Calculated for each covariate</li>
+                            <li>Overall average SMD reported</li>
+                            <li>Automatic flagging system</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="assessment-box">
+                    <div class="assessment-title">Covariate Balance Testing</div>
+                    <div class="highlight-box">
+                        <strong>Variables Assessed:</strong>
+                        <ul class="step-list">
+                            <li>PTAL baseline levels</li>
+                            <li>IMD baseline scores</li>
+                            <li>Population sizes (log-transformed)</li>
+                            <li>Pre-treatment trend variables</li>
+                            <li>Geographic distance controls</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="assessment-box">
+                    <div class="assessment-title">Small Sample Special Handling</div>
+                    <div class="highlight-box">
+                        <strong>Adaptive Procedures:</strong>
+                        <ul class="step-list">
+                            <li><strong>n=1:</strong> Synthetic Control recommended</li>
+                            <li><strong>n≤3:</strong> Report with extreme caution</li>
+                            <li><strong>n≤10:</strong> Bootstrap confidence intervals</li>
+                            <li>Alternative identification strategies</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="assessment-box">
+                    <div class="assessment-title">Final Validation Metrics</div>
+                    <div class="highlight-box">
+                        <strong>Success Criteria:</strong>
+                        <ul class="step-list">
+                            <li>Treatment-control balance achieved</li>
+                            <li>Sufficient sample sizes maintained</li>
+                            <li>Geographic constraints satisfied</li>
+                            <li>Trend assumptions validated</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="quality-metrics">
+        <div class="metrics-title">Final Deliverables & Performance Metrics</div>
+        
+        <div class="metrics-grid">
+            <div class="metric-item">
+                <span class="metric-value">3</span>
+                <span class="metric-label">Matching Strategies</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value">4+4+5</span>
+                <span class="metric-label">Progressive Layers</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value">NLE: 35</span>
+                <span class="metric-label">Treatment Units</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value">BRE: 4</span>
+                <span class="metric-label">Treatment Units</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value">SMD < 0.25</span>
+                <span class="metric-label">Balance Threshold</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value">1.5-8km</span>
+                <span class="metric-label">Distance Range</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value">9 Years</span>
+                <span class="metric-label">PTAL Coverage</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value">5 Years</span>
+                <span class="metric-label">IMD Coverage</span>
+            </div>
+        </div>
+        
+        <div style="margin-top: 25px; text-align: center;">
+            <div style="font-size: 14pt; font-weight: bold; margin-bottom: 10px;">
+                🎯 RECOMMENDED: Strategy 3 (Simplified Robust)
+            </div>
+            <div style="font-size: 12pt;">
+                <strong>Ready for:</strong> Difference-in-Differences Analysis • Spatial Econometric Models • Robustness Testing • Publication
+            </div>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

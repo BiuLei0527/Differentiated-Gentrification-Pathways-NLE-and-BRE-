@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<style>
+body {
+    background-color: white;
+    font-family: Arial, Helvetica, sans-serif;
+    margin: 20px;
+}
+
+.table-container {
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.clean-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11pt;
+    margin: 0 auto;
+}
+
+.clean-table thead tr:first-child th {
+    border-top: 2px solid black;
+}
+
+.clean-table thead tr:last-child th {
+    border-bottom: 2px solid black;
+}
+
+.clean-table thead th {
+    padding: 8px 10px;
+    text-align: left;
+    font-weight: bold;
+    background-color: white;
+}
+
+.clean-table tbody td {
+    padding: 8px 10px;
+    text-align: left;
+    border: none;
+    background-color: white;
+    height: 24px;
+    vertical-align: top;
+    line-height: 1.2;
+}
+
+.table-bottom-border {
+    border-top: 2px solid black;
+    margin: 0;
+    padding: 0;
+}
+</style>
+</head>
+<body>
+<div class="table-container">
+    <table class="clean-table">
+        <thead>
+            <tr>
+                <th>Dataset</th>
+                <th>Source</th>
+                <th>Information Extracted</th>
+                <th>Application/Process</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Income estimates for small areas, England and Wales</td>
+                <td>Department for Work and Pensions (via ONS) Family Resources Survey</td>
+                <td>MSOA-Level estimated income in financial year</td>
+                <td>Estimate LSOA-level income</td>
+            </tr>
+            <tr>
+                <td>Statistical GIS Boundary Files for London</td>
+                <td>Greater London Authority (GLA) (via London Datastore)</td>
+                <td>2011 London LSOA boundary</td>
+                <td>Process and attain LSOA-level variables</td>
+            </tr>
+            <tr>
+                <td>MPS Recorded Crime: Geographic Breakdown</td>
+                <td>Metropolitan Police Service (via London Datastore)</td>
+                <td>Historical LSOA-level crime statistics</td>
+                <td>Sum up and process with population to attain LSOA-level crime rate</td>
+            </tr>
+            <tr>
+                <td>Output Area (2011) to LSOA to MSOA to LAD (December 2011) Exact Fit Lookup in EW</td>
+                <td>Office for National Statistics (via Open Geography Portal)</td>
+                <td>2011 LSOA to MSOA fit lookup</td>
+                <td>Attain detailed LSOA to MSOA fit lookup for preparing for estimating LSOA-level income</td>
+            </tr>
+            <tr>
+                <td>Postcode to OA (2011) to LSOA to MSOA to LAD (December 2011) Best Fit Lookup in EW</td>
+                <td>Office for National Statistics (via Open Geography Portal)</td>
+                <td>2011 Postcode to LSOA best fit lookup</td>
+                <td>Summarize actual housing transaction data by post code</td>
+            </tr>
+            <tr>
+                <td>LSOA (2011) to LSOA (2021) to Local Authority District (2022) Best Fit Lookup for EW (V2)</td>
+                <td>Office for National Statistics (via Open Geography Portal)</td>
+                <td>2011 LSOA to 2021 LSOA best fit lookup</td>
+                <td>Summarize population data in 2021 and 2022 based on 2021 LSOA code into 2011 LSOA code</td>
+            </tr>
+            <tr>
+                <td>LSOA (2011) to LSOA (2021) to Local Authority District (2022) Exact Fit Lookup for EW (V3)</td>
+                <td>Office for National Statistics (via Open Geography Portal)</td>
+                <td>2011 LSOA to 2021 LSOA exact fit lookup</td>
+                <td>Summarize population data and compare with best fit lookup sum</td>
+            </tr>
+            <tr>
+                <td>Residential Mobility Index</td>
+                <td>GeoDS Linked Consumer Register (via Geographic Data Service)</td>
+                <td>1997 to 2023 residential mobility</td>
+                <td>One of metrics for measuring gentrification</td>
+            </tr>
+            <tr>
+                <td>Index of Multiple Deprivation (IMD)</td>
+                <td>Ministry of Housing, Communities & Local Government (via Geographic Data Service)</td>
+                <td>2004/2007/2010/2015 LSOA-level Index of Multiple Deprivation</td>
+                <td>1. Variable for estimating income<br>2. Variable for selecting control group in DiD</td>
+            </tr>
+            <tr>
+                <td>English indices of deprivation 2019</td>
+                <td>Ministry of Housing, Communities & Local Government (via UK government)</td>
+                <td>2019 LSOA-level Index of Multiple Deprivation</td>
+                <td>1. Variable for estimating income<br>2. Variable for selecting control group in DiD</td>
+            </tr>
+            <tr>
+                <td>Lower layer Super Output Area population estimates (Accredited official statistics)</td>
+                <td>Office for National Statistics, ONS (via UK government)</td>
+                <td>2011 to 2022 LSOA level population estimates</td>
+                <td>1. Variable for estimating LSOA level income<br>2. For calculating population density as control variable in DiD</td>
+            </tr>
+            <tr>
+                <td>Claimant Count - seasonally adjusted</td>
+                <td>Office for National Statistics, ONS (via Nomis)</td>
+                <td>2013 to 2023 claimant count</td>
+                <td>Variable for estimating LSOA level income</td>
+            </tr>
+            <tr>
+                <td>House Price per Square Metre in England and Wales</td>
+                <td>University College London (UCL) (via London Datastore)</td>
+                <td>House transaction data (house postcode) by borough from 1994 to 2024</td>
+                <td>To supplement the missing median house prices in LSOA statistics and avoid excessive missing values</td>
+            </tr>
+            <tr>
+                <td>Median house prices by lower layer super output area: HPSSA dataset 46</td>
+                <td>HM Land Registry (via ONS)</td>
+                <td>Median house prices by LSOA</td>
+                <td>1. Variable for estimating LSOA level income<br>2. One of metrics for measuring gentrification</td>
+            </tr>
+            <tr>
+                <td>BRE / NLE route and station geopackage</td>
+                <td>Transport for London</td>
+                <td>BRE and NLE route and station</td>
+                <td>1. Generate a buffer based on distance at the site to obtain the affected LSOA<br>2. Calculate the distance from each LSOA to the station as the basis for selecting control groups<br>3. Calculate spatial weights based on the distance to the site</td>
+            </tr>
+            <tr>
+                <td>Public Transport Accessibility Level Data</td>
+                <td>Transport for London</td>
+                <td>2005 to 2023 Greater London PTAL contours, grid cells and grid points data</td>
+                <td>Summarize three different types of TAB data into 2011 LSOA to obtain PTAL and AI score for selecting control group</td>
+            </tr>
+        </tbody>
+    </table>
+    <div class="table-bottom-border"></div>
+</div>
+</body>
+</html>

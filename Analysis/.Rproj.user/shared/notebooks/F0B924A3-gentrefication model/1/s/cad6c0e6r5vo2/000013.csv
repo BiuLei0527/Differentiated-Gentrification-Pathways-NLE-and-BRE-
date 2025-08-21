@@ -1,0 +1,7 @@
+"0","pop_density <- combined_data_final_ver %>%
+  dplyr::select(LSOA11CD, year, population) %>% 
+  left_join(lsoa_2011 %>% dplyr::select(LSOA11CD, area_num),
+            by=LSOA11CD)
+"
+"2","Error: object 'LSOA11CD' not found
+"

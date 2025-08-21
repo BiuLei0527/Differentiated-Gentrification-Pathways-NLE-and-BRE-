@@ -1,0 +1,8 @@
+"0","lookup <- read_csv(""/Users/xilver/Downloads/2011_lookup.csv"", show_col_types = FALSE)"
+"0","lookup_clean <- lookup %>%"
+"0","  dplyr::select(MSOA11CD, LSOA11CD, LSOA11NM) %>%"
+"0","  distinct() "
+"0","combined_lookup <- income_yearly %>%"
+"0","  rename(msoa_income = income) %>%"
+"0","  left_join(lookup_clean, by = c(""MSOA code"" = ""MSOA11CD""), relationship = ""many-to-many"")"
+"0","  "

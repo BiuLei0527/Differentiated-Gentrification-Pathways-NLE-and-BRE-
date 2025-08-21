@@ -1,0 +1,1412 @@
+---
+title: "Gentrification model"
+output: html_document
+---
+
+# Reading matched control group
+
+```{r}
+read_matched_samples <- function() {
+  
+  # Read NLE matched sample
+  nle_path <- "/Users/xilver/Desktop/CASA0004/R/LSOAs indicators/output_simple/nle_matched_simple.csv"
+  bre_path <- "/Users/xilver/Desktop/CASA0004/R/LSOAs indicators/output_simple/bre_matched_simple.csv"
+  
+  if(file.exists(nle_path)) {
+    nle_matched <- read_csv(nle_path)
+    cat("✅ NLE matched data loaded:", nrow(nle_matched), "LSOAs\n")
+    cat("   - Treatment:", sum(nle_matched$treatment == 1), "\n")
+    cat("   - Control:", sum(nle_matched$treatment == 0), "\n")
+  } else {stop("❌ NLE matched file not found at:", nle_path)}
+  
+  if(file.exists(bre_path)) {
+    bre_matched <- read_csv(bre_path)
+    cat("✅ BRE matched data loaded:", nrow(bre_matched), "LSOAs\n")
+    cat("   - Treatment:", sum(bre_matched$treatment == 1), "\n")
+    cat("   - Control:", sum(bre_matched$treatment == 0), "\n")
+  } else {stop("❌ BRE matched file not found at:", bre_path)}
+  
+  # Add project identifier
+  nle_matched <- nle_matched %>%
+    mutate(project = "NLE",
+           intervention_year = 2015)
+  
+  bre_matched <- bre_matched %>%
+    mutate(project = "BRE",
+           intervention_year = 2016)
+  
+  list2env(list(nle_matched = nle_matched, bre_matched = bre_matched), .GlobalEnv)}
+
+read_matched_samples()
+```
+
+# Reading estimated income and combining all variables
+
+```{r}
+income_path <- "/Users/xilver/Desktop/CASA0004/R/LSOAs indicators/lsoa_income_estimates.csv"
+
+income_data <- read_csv(income_path, show_col_types = FALSE) %>%
+  rename(LSOA11CD = lsoa_code)
+
+mobility <- mobility %>%
+  rename(LSOA11CD = LSOA11cd)
+
+income_mobility <- income_data %>%
+  left_join(mobility, by=c("LSOA11CD", "year"))
+
+combined_metrics <- income_mobility %>%
+  left_join(crime_pop %>% dplyr::select(LSOA11CD, year, "crime rate"),
+            by = c("LSOA11CD", "year")) %>%
+  mutate(`crime rate` = replace(`crime rate`, is.na(`crime rate`), 0)) %>%
+  dplyr::select(LSOA11CD, year, lsoa_income_estimate, "crime rate", median_price, mobility) %>%
+  arrange(LSOA11CD)
+```
+
+# Selecting corresponding variables for treatment and control group
+
+```{r}
+bre_affected_metrics <- bre_affected_new %>%
+  dplyr::select(LSOA11CD, geometry) %>%
+  left_join(combined_metrics, by = "LSOA11CD")
+
+nle_affected_metrics <- nle_affected_new %>%
+  dplyr::select(LSOA11CD, geometry) %>%
+  left_join(combined_metrics, by = "LSOA11CD")
+
+nle_matched_metrics <- nle_matched %>%
+  filter(treatment == 0) %>%
+  dplyr::select(LSOA11CD, geometry) %>%
+  left_join(combined_metrics, by = "LSOA11CD")
+
+bre_matched_metrics <- bre_matched %>%
+  filter(treatment == 0) %>%
+  dplyr::select(LSOA11CD, geometry) %>%
+  left_join(combined_metrics, by = "LSOA11CD")
+```
+
+# Parallel trend test
+
+```{r}
+library(tidyverse)
+library(fixest)
+library(ggplot2)
+library(patchwork)
+library(broom)
+library(sf)
+
+theme_ucl <- function() {
+  theme_bw() +
+    theme(plot.title = element_text(size = 12, face = "bold", hjust = 0),
+      plot.subtitle = element_text(size = 10, hjust = 0, color = "gray30"),
+      axis.title = element_text(size = 10, face = "bold"),
+      axis.text = element_text(size = 9),
+      legend.title = element_blank(),
+      legend.text = element_text(size = 9),
+      legend.position = "bottom",
+      legend.background = element_rect(fill = "white", color = NA),
+      panel.grid.major = element_line(color = "gray90", size = 0.2),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(color = "black", size = 0.5),
+      strip.background = element_rect(fill = "gray95", color = "black"),
+      strip.text = element_text(size = 10, face = "bold"))}
+
+prepare_panel_for_analysis <- function(control_df, treatment_df, project_name) {
+  
+  intervention_year <- ifelse(project_name == "NLE", 2015, 2016)
+  
+  control_df <- control_df %>%
+    st_drop_geometry() %>%
+    mutate(treatment = 0)
+  
+  treatment_df <- treatment_df %>%
+    st_drop_geometry() %>%
+    mutate(treatment = 1)
+  
+  panel_data <- bind_rows(control_df, treatment_df) %>%
+    mutate(project = project_name,
+      intervention_year = intervention_year,
+      post = ifelse(year >= intervention_year, 1, 0),
+      time_to_intervention = year - intervention_year,
+      did = treatment * post)
+  
+  panel_data <- panel_data %>%
+    rename(income = lsoa_income_estimate,
+      crime_rate = `crime rate`,
+      house_price = median_price)
+  
+  panel_data <- panel_data %>%
+    mutate(year = as.numeric(year),
+      income = as.numeric(income),
+      crime_rate = as.numeric(crime_rate),
+      house_price = as.numeric(house_price),
+      mobility = as.numeric(mobility))
+  
+  cat("Data Summary:\n")
+  cat("- Observations:", nrow(panel_data), "\n")
+  cat("- LSOAs:", n_distinct(panel_data$LSOA11CD), "\n")
+  cat("  Treatment:", sum(panel_data$treatment == 1 & panel_data$year == 2011), "\n")
+  cat("  Control:", sum(panel_data$treatment == 0 & panel_data$year == 2011), "\n")
+  cat("- Period:", paste(range(panel_data$year), collapse = "-"), "\n")
+  cat("- Intervention:", intervention_year, "\n\n")
+  
+  return(panel_data)}
+
+test_parallel_trends_pretreatment <- function(panel_data, outcome_var, project_name) {
+  
+  intervention_year <- unique(panel_data$intervention_year)[1]
+
+  pre_data <- panel_data %>%
+    filter(year < intervention_year, !is.na(!!sym(outcome_var)))
+  
+  if(nrow(pre_data) == 0) {
+    cat("Warning: No pre-treatment data available\n")
+    return(NULL)}
+
+  trend_test <- lm(as.formula(paste(outcome_var, "~ treatment * year")),
+    data = pre_data)
+  
+  interaction_coef <- coef(trend_test)["treatment:year"]
+  interaction_se <- summary(trend_test)$coefficients["treatment:year", "Std. Error"]
+  interaction_pval <- summary(trend_test)$coefficients["treatment:year", "Pr(>|t|)"]
+  
+  fe_results <- tryCatch({
+    fe_model <- feols(as.formula(paste(outcome_var, "~ treatment * year | LSOA11CD")),
+      data = pre_data,
+      cluster = ~LSOA11CD)
+    
+    fe_tidy <- tidy(fe_model)
+    fe_interaction <- fe_tidy %>% filter(term == "treatment:year")
+    
+    list(coef = fe_interaction$estimate[1],
+      se = fe_interaction$std.error[1],
+      pval = fe_interaction$p.value[1])}, error = function(e) {
+    list(coef = NA, se = NA, pval = NA)})
+  
+  result <- list(outcome = outcome_var,
+    project = project_name,
+    simple_model = list(coefficient = interaction_coef,
+      std_error = interaction_se,
+      p_value = interaction_pval),
+    fe_model = fe_results,
+    pass_simple = interaction_pval > 0.05,
+    pass_fe = ifelse(is.na(fe_results$pval), NA, fe_results$pval > 0.05),
+    n_obs = nrow(pre_data),
+    n_years_pre = n_distinct(pre_data$year))
+  
+  cat("\nOutcome:", outcome_var, "\n")
+  cat("Pre-treatment periods:", n_distinct(pre_data$year), "\n")
+  cat("Differential trend coefficient:", round(interaction_coef, 4), "\n")
+  cat("Standard error:", round(interaction_se, 4), "\n")
+  cat("P-value:", round(interaction_pval, 3), "\n")
+  cat("Result:", ifelse(result$pass_simple, "Parallel trends supported", "Parallel trends violated"), "\n")
+  
+  return(result)}
+
+plot_parallel_trends_academic <- function(panel_data, outcome_var, project_name, test_result = NULL) {
+  
+  intervention_year <- unique(panel_data$intervention_year)[1]
+  
+
+  pre_trend_data <- panel_data %>%
+    filter(year < intervention_year, !is.na(!!sym(outcome_var))) %>%
+    group_by(year, treatment) %>%
+    summarise(
+      mean_value = mean(!!sym(outcome_var), na.rm = TRUE),
+      se = sd(!!sym(outcome_var), na.rm = TRUE) / sqrt(n()),
+      ci_lower = mean_value - 1.96 * se,
+      ci_upper = mean_value + 1.96 * se,
+      n = n(),
+      .groups = "drop") %>%
+    mutate(Group = factor(ifelse(treatment == 1, "Treatment", "Control"),
+                    levels = c("Treatment", "Control")))
+
+  y_label <- case_when(
+    outcome_var == "income" ~ "Income (GBP)",
+    outcome_var == "crime_rate" ~ "Crime Rate per Capita",
+    outcome_var == "house_price" ~ "Median House Price (GBP)",
+    outcome_var == "mobility" ~ "Residential Mobility Rate",
+    TRUE ~ str_to_title(gsub("_", " ", outcome_var)))
+  
+  # Create subtitle with test results
+  subtitle_text <- ifelse(
+    !is.null(test_result),
+    paste0("Pre-treatment differential trend: ", 
+           sprintf("%.2e", test_result$simple_model$coefficient),
+           ", p = ", sprintf("%.3f", test_result$simple_model$p_value)),
+    "Pre-treatment period analysis")
+  
+
+  p <- ggplot(pre_trend_data, aes(x = year, y = mean_value, group = Group)) +
+
+    geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = Group),
+               alpha = 0.15, color = NA) +
+
+    geom_line(aes(color = Group), size = 0.8) +
+
+    geom_point(aes(color = Group, shape = Group), size = 2) +
+
+    labs(title = paste0("Figure: Pre-treatment Trends in ", 
+                    str_to_title(gsub("_", " ", outcome_var)), " (", project_name, ")"),
+      subtitle = subtitle_text,
+      x = "Year",
+      y = y_label,
+      caption = paste("Note: Shaded areas represent 95% confidence intervals.",
+                     "Sample includes", n_distinct(panel_data$LSOA11CD), "LSOAs.")) +
+
+    theme_ucl() +
+
+    scale_color_manual(values = c("Treatment" = "#D32F2F", "Control" = "#1976D2")) +
+    scale_fill_manual(values = c("Treatment" = "#D32F2F", "Control" = "#1976D2")) +
+    scale_shape_manual(values = c("Treatment" = 16, "Control" = 17)) +
+
+    scale_x_continuous(
+      breaks = seq(min(pre_trend_data$year), max(pre_trend_data$year), by = 1),
+      minor_breaks = NULL
+    ) + scale_y_continuous(labels = scales::comma)
+  
+  return(p)}
+
+comprehensive_parallel_trends_analysis <- function(control_df, treatment_df, project_name) {
+  
+  panel_data <- prepare_panel_for_analysis(control_df, treatment_df, project_name)
+  
+  outcomes <- c("income", "crime_rate", "house_price", "mobility")
+  
+  test_results <- list()
+  plots <- list()
+  
+  for(outcome in outcomes) {
+    
+    cat("\n---", str_to_title(gsub("_", " ", outcome)), "---\n")
+    
+    test_result <- test_parallel_trends_pretreatment(panel_data, outcome, project_name)
+    
+    if(!is.null(test_result)) {
+      test_results[[outcome]] <- test_result
+      
+      p <- plot_parallel_trends_academic(panel_data, outcome, project_name, test_result)
+      plots[[outcome]] <- p}}
+
+  summary_table <- map_df(test_results, function(x) {
+    data.frame(
+      Outcome = str_to_title(gsub("_", " ", x$outcome)),
+      Coefficient = x$simple_model$coefficient,
+      SE = x$simple_model$std_error,
+      t_statistic = x$simple_model$coefficient / x$simple_model$std_error,
+      P_Value = x$simple_model$p_value,
+      N_Obs = x$n_obs,
+      Pre_Years = x$n_years_pre,
+      Result = ifelse(x$pass_simple, "Supported", "Violated"),
+      stringsAsFactors = FALSE)})
+  
+  cat("\n\nPARALLEL TRENDS TEST RESULTS\n")
+  cat("========================================\n")
+  print(summary_table, digits = 4)
+  
+  return(list(panel_data = panel_data,
+    test_results = test_results,
+    plots = plots,
+    summary = summary_table))}
+
+nle_analysis <- comprehensive_parallel_trends_analysis(
+  control_df = nle_matched_metrics,
+  treatment_df = nle_affected_metrics,
+  project_name = "NLE")
+
+bre_analysis <- comprehensive_parallel_trends_analysis(
+  control_df = bre_matched_metrics,
+  treatment_df = bre_affected_metrics,
+  project_name = "BRE")
+
+create_academic_panel <- function(analysis_results, project_name) {
+  
+  plots <- analysis_results$plots
+  
+  combined_plot <- (plots$income | plots$crime_rate) / 
+                  (plots$house_price | plots$mobility) +
+    plot_annotation(
+      title = paste0("Pre-treatment Parallel Trends Analysis: ", project_name, " Extension"),
+      subtitle = paste0("Period: 2011-", ifelse(project_name == "NLE", "2014", "2015")),
+      caption = "Note: Analysis restricted to pre-intervention period to test parallel trends assumption.",
+      theme = theme(
+        plot.title = element_text(size = 14, face = "bold"),
+        plot.subtitle = element_text(size = 11, color = "gray30"),
+        plot.caption = element_text(size = 9, hjust = 0)))
+  
+  return(combined_plot)}
+
+nle_panel <- create_academic_panel(nle_analysis, "NLE")
+bre_panel <- create_academic_panel(bre_analysis, "BRE")
+
+
+if(!dir.exists("parallel_trends_results")) {
+  dir.create("parallel_trends_results")}
+
+for(outcome in names(nle_analysis$plots)) {
+  ggsave(paste0("parallel_trends_results/nle_", outcome, "_pretrend.pdf"),
+    nle_analysis$plots[[outcome]],
+    width = 7, height = 5, device = cairo_pdf)}
+
+for(outcome in names(bre_analysis$plots)) {
+  ggsave(paste0("parallel_trends_results/bre_", outcome, "_pretrend.pdf"),
+    bre_analysis$plots[[outcome]],
+    width = 7, height = 5, device = cairo_pdf)}
+
+
+ggsave("parallel_trends_results/nle_panel_pretrends.pdf",
+  nle_panel,
+  width = 12, height = 10, device = cairo_pdf)
+
+ggsave("parallel_trends_results/bre_panel_pretrends.pdf",
+  bre_panel,
+  width = 12, height = 10, device = cairo_pdf)
+
+# Save summary tables
+write_csv(nle_analysis$summary, "parallel_trends_results/nle_pretrend_tests.csv")
+write_csv(bre_analysis$summary, "parallel_trends_results/bre_pretrend_tests.csv")
+
+# Combined summary
+combined_summary <- bind_rows(
+  nle_analysis$summary %>% mutate(Project = "NLE"),
+  bre_analysis$summary %>% mutate(Project = "BRE"))
+
+write_csv(combined_summary, "parallel_trends_results/combined_pretrend_tests.csv")
+
+cat("\n\nResults saved to parallel_trends_results/\n")
+cat("All plots exported as PDF for academic publication\n")
+```
+# Adding geometry info into treatment group
+
+```{r}
+pop_density <- combined_data_final_ver %>%
+  dplyr::select(LSOA11CD, year, population) %>% 
+  left_join(lsoa_2011 %>% dplyr::select(LSOA11CD, area_num),
+            by="LSOA11CD") %>%
+  mutate(population_density = population/area_num * 1000000)
+
+lsoa_bre_control <- bre_matched$LSOA11CD
+
+lsoa_nle_control <- nle_matched$LSOA11CD
+
+nle_matched_metrics <- nle_matched_metrics %>%
+  dplyr::select(-geometry) %>%
+  left_join(lsoa_2011 %>% dplyr::select(LSOA11CD, geometry) %>%
+      filter(LSOA11CD %in% lsoa_nle_control), by = "LSOA11CD") %>%
+  left_join(pop_density %>% dplyr::select(year, LSOA11CD, population_density), 
+            by = c("LSOA11CD", "year"))
+  
+bre_matched_metrics <- bre_matched_metrics %>%
+  dplyr::select(-geometry) %>%
+  left_join(lsoa_2011 %>% dplyr::select(LSOA11CD, geometry) %>%
+      filter(LSOA11CD %in% lsoa_bre_control), by = "LSOA11CD") %>%
+  left_join(pop_density %>% dplyr::select(year, LSOA11CD, population_density), 
+            by = c("LSOA11CD", "year"))
+
+nle_affected_metrics <- nle_affected_metrics %>% 
+  left_join(pop_density %>% dplyr::select(year, LSOA11CD, population_density), 
+            by = c("LSOA11CD", "year"))
+
+bre_affected_metrics <- bre_affected_metrics %>% 
+  left_join(pop_density %>% dplyr::select(year, LSOA11CD, population_density), 
+            by = c("LSOA11CD", "year"))
+```
+
+# Spatial difference-in-difference
+```{r}
+library(tidyverse)
+library(fixest)
+library(sf)
+library(spdep)
+library(spatialreg)
+library(splm)
+library(plm)
+library(ggplot2)
+library(gridExtra)
+library(gsynth)
+library(panelView)
+library(did)
+library(lmtest)
+library(sandwich)
+library(boot)
+library(Synth)
+
+GLOBAL_SEED <- 20240115
+set.seed(GLOBAL_SEED)
+BOOTSTRAP_REPS <- 500
+GSYNTH_BOOTS <- 200
+
+prepare_analysis_data <- function(control_df, treatment_df, project_name, station_data) {
+  intervention_year <- ifelse(project_name == "NLE", 2015, 2016)
+  
+  if(!"sf" %in% class(control_df)) control_df <- st_as_sf(control_df)
+  if(!"sf" %in% class(treatment_df)) treatment_df <- st_as_sf(treatment_df)
+  
+  control_df$treatment <- 0
+  treatment_df$treatment <- 1
+  
+  combined_sf <- rbind(control_df, treatment_df)
+  
+  if(st_crs(combined_sf) != st_crs(station_data)) {
+    combined_sf <- st_transform(combined_sf, crs = st_crs(station_data))}
+  
+  dist_matrix <- st_distance(combined_sf, station_data)
+  combined_sf$dist_to_station <- as.numeric(apply(dist_matrix, 1, min))
+  
+  panel_data <- combined_sf %>%
+    st_drop_geometry() %>%
+    mutate(
+      project = project_name,
+      intervention_year = intervention_year,
+      post = ifelse(year >= intervention_year, 1, 0),
+      did = treatment * post,
+      time_to_intervention = year - intervention_year,
+      dist_km = dist_to_station / 1000,
+      dist_group = case_when(
+        dist_km < 1 ~ "0-1km",
+        dist_km < 2 ~ "1-2km",
+        dist_km < 5 ~ "2-5km",
+        TRUE ~ "5km+")) %>%
+    rename(income = lsoa_income_estimate,
+      crime_rate = `crime rate`,
+      house_price = median_price) %>%
+    mutate_at(vars(year, income, crime_rate, house_price, mobility), as.numeric)
+  
+  if("population_density" %in% names(combined_sf)) {
+    panel_data$population_density <- as.numeric(combined_sf$population_density)
+  } else if("population" %in% names(combined_sf) && "area" %in% names(combined_sf)) {
+    panel_data$population_density <- as.numeric(combined_sf$population / combined_sf$area)}
+  
+  cat("\nData preparation completed:\n")
+  cat("  - Treatment group:", sum(panel_data$treatment == 1 & panel_data$year == min(panel_data$year)), "\n")
+  cat("  - Control group:", sum(panel_data$treatment == 0 & panel_data$year == min(panel_data$year)), "\n")
+  cat("  - Time span:", min(panel_data$year), "-", max(panel_data$year), "\n")
+  cat("  - Population density variable:", ifelse("population_density" %in% names(panel_data), "✓", "✗"), "\n\n")
+  
+  spatial_data <- combined_sf %>%
+    select(LSOA11CD, treatment, dist_to_station, geometry) %>%
+    distinct(LSOA11CD, .keep_all = TRUE) %>%
+    arrange(LSOA11CD)
+  
+  return(list(panel = panel_data,
+    spatial = spatial_data,
+    intervention_year = intervention_year))}
+
+estimate_basic_did <- function(panel_data, outcome_var, project_name) {
+  results <- list()
+  
+  has_pop_density <- "population_density" %in% names(panel_data) &&
+                     !all(is.na(panel_data$population_density))
+  
+  tryCatch({if(has_pop_density) {
+      simple_did <- lm(
+        as.formula(paste(outcome_var, "~ did + treatment + post + population_density")),
+        data = panel_data
+      )} else {simple_did <- lm(
+        as.formula(paste(outcome_var, "~ did + treatment + post")),
+        data = panel_data)}
+    results$simple <- extract_results(simple_did, "did", "lm")
+  }, error = function(e) {results$simple <- NULL})
+  
+  tryCatch({if(has_pop_density) {
+      standard_did <- feols(
+        as.formula(paste(outcome_var, "~ did + population_density | LSOA11CD + year")),
+        data = panel_data,
+        cluster = ~LSOA11CD)
+      cat("  ✓ Using population density as control variable\n")
+    } else {standard_did <- feols(
+        as.formula(paste(outcome_var, "~ did | LSOA11CD + year")),
+        data = panel_data,
+        cluster = ~LSOA11CD)
+      cat("  ⚠ Population density control not included\n")}
+    
+    results$standard <- extract_results(standard_did, "did", "feols")
+    
+    r2_val <- tryCatch({
+      fixest::r2(standard_did)$r2
+    }, error = function(e) NA)
+    
+    results$standard$r2 <- r2_val
+    results$standard$n <- nobs(standard_did)
+    
+    if(has_pop_density && "population_density" %in% names(coef(standard_did))) {
+      results$standard$pop_density_coef <- coef(standard_did)["population_density"]
+    }}, error = function(e) {results$standard <- NULL})
+  
+  tryCatch({event_results <- estimate_event_study(panel_data, outcome_var, has_pop_density)
+    results$event_study <- event_results
+  }, error = function(e) {results$event_study <- NULL})
+  
+  tryCatch({hetero_results <- estimate_heterogeneous_did(panel_data, outcome_var, has_pop_density)
+    results$heterogeneous <- hetero_results}, error = function(e) {
+    results$heterogeneous <- NULL})
+  
+  tryCatch({
+    no_covid <- panel_data %>% filter(!(year %in% c(2020, 2021)))
+    
+    if(has_pop_density) {
+      robust_did <- feols(
+        as.formula(paste(outcome_var, "~ did + population_density | LSOA11CD + year")),
+        data = no_covid,
+        cluster = ~LSOA11CD
+      )} else {robust_did <- feols(
+        as.formula(paste(outcome_var, "~ did | LSOA11CD + year")),
+        data = no_covid,
+        cluster = ~LSOA11CD)}
+    results$no_covid <- extract_results(robust_did, "did", "feols")}, error = function(e) {
+    results$no_covid <- NULL})
+  
+  return(results)}
+
+create_multiple_spatial_weights <- function(spatial_data) {
+  weights_list <- list()
+  weights_evaluation <- list()
+  
+  coords <- suppressWarnings(st_coordinates(st_centroid(spatial_data, of_largest_polygon = TRUE)))
+  n <- nrow(coords)
+  
+  cat("\nSpatial weight matrices construction (Distance+KNN weights):\n")
+  cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+  
+  cat("\n1️⃣ K-nearest neighbors weights (KNN):\n")
+  k_values <- c(5, 10)
+  
+  for(k in k_values) {
+    if(k < n/2) {
+      tryCatch({set.seed(GLOBAL_SEED)
+        nb_knn <- knn2nb(knearneigh(coords, k = k))
+        W_knn <- nb2listw(nb_knn, style = "W", zero.policy = TRUE)
+        weights_list[[paste0("knn_", k)]] <- W_knn
+        
+        avg_neighbors <- mean(card(nb_knn))
+        cat(sprintf("  KNN-%d: Average neighbors=%.1f\n", k, avg_neighbors))
+        cat("    Advantages: Fixed neighbor count, suitable for spillover analysis\n")
+        
+        if(k == 5) {
+          cat("    Suitability: ★★★★★ (KNN-5 recommended for main analysis)\n\n")
+          suitability <- 5} else {
+          cat("    Suitability: ★★★★☆ (KNN-10 for robustness check)\n\n")
+          suitability <- 4}
+        
+        weights_evaluation[[paste0("knn_", k)]] <- list(
+          type = "KNN",
+          k = k,
+          avg_neighbors = avg_neighbors,
+          suitability = suitability
+        )
+      }, error = function(e) {
+        cat(sprintf("  KNN-%d: Construction failed\n", k))
+      })} else {cat(sprintf("  KNN-%d: Skipped (insufficient sample size)\n", k))}}
+  
+  cat("\n2️⃣ Distance threshold weights:\n")
+  dist_mat <- as.matrix(dist(coords))
+  median_dist <- median(dist_mat[dist_mat > 0])
+  thresholds <- c(median_dist/2, median_dist, median_dist*2)
+  threshold_labels <- c("Short", "Medium", "Long")
+  
+  for(i in seq_along(thresholds)) {
+    thresh <- thresholds[i]
+    label <- threshold_labels[i]
+    
+    tryCatch({nb_dist <- dnearneigh(coords, 0, thresh)
+      
+      if(any(card(nb_dist) == 0)) {
+        for(j in which(card(nb_dist) == 0)) {
+          distances <- dist_mat[j,]
+          distances[j] <- Inf
+          nearest <- which.min(distances)
+          nb_dist[[j]] <- as.integer(nearest)}}
+      
+      W_dist <- nb2listw(nb_dist, style = "W", zero.policy = TRUE)
+      weights_list[[paste0("dist_", round(thresh))]] <- W_dist
+      
+      avg_neighbors <- mean(card(nb_dist))
+      isolated <- sum(card(nb_dist) == 1)
+      
+      cat(sprintf("  Distance-%s (%.0fm): Avg neighbors=%.1f, Isolated=%d\n",
+                   label, thresh, avg_neighbors, isolated))
+      cat("    Advantages: Based on actual geographic distance, clear economic meaning\n")
+      
+      if(i == 2) {cat("    Suitability: ★★★★★ (Medium distance most balanced, recommended)\n\n")
+        suitability <- 5
+      } else if(i == 1) {
+        cat("    Suitability: ★★★★☆ (Short distance, local effects)\n\n")
+        suitability <- 4
+      } else {cat("    Suitability: ★★★☆☆ (Long distance, potentially unstable)\n\n")
+        suitability <- 3}
+      
+      weights_evaluation[[paste0("dist_", round(thresh))]] <- list(
+        type = "Distance",
+        threshold = thresh,
+        label = label,
+        avg_neighbors = avg_neighbors,
+        isolated_units = isolated,
+        suitability = suitability
+      )}, error = function(e) {cat(sprintf("  Distance-%s: Construction failed\n", label))})}
+  
+  
+  return(list(weights = weights_list,
+    evaluation = weights_evaluation))}
+
+estimate_spatial_did_multiple_weights <- function(panel_data, spatial_data, outcome_var, project_name) {weights_info <- create_multiple_spatial_weights(spatial_data)
+  all_weights <- weights_info$weights
+  weights_eval <- weights_info$evaluation
+  
+  if(length(all_weights) == 0) {return(NULL)}
+  
+  has_pop_density <- "population_density" %in% names(panel_data) &&
+                     !all(is.na(panel_data$population_density))
+  
+  spatial_panel <- panel_data %>%
+    filter(!is.na(!!sym(outcome_var))) %>%
+    arrange(year, LSOA11CD)
+  
+  spatial_results <- list()
+  
+  
+  for(weight_name in names(all_weights)) {
+    cat(sprintf("\nAnalyzing weight: %s\n", weight_name))
+    
+    W <- all_weights[[weight_name]]
+    weight_results <- list()
+    
+    tryCatch({slm_data <- spatial_panel %>%
+        group_by(year) %>%
+        mutate(
+          W_y = as.numeric(lag.listw(W, get(outcome_var), zero.policy = TRUE)),
+          W_did = as.numeric(lag.listw(W, did, zero.policy = TRUE))) %>%
+        ungroup() %>%
+        mutate(W_y = ifelse(is.na(W_y), 0, W_y),
+          W_did = ifelse(is.na(W_did), 0, W_did))
+      
+      if(has_pop_density) {
+        slm_data <- slm_data %>%
+          group_by(year) %>%
+          mutate(W_pop = as.numeric(lag.listw(W, population_density, zero.policy = TRUE))) %>%
+          ungroup() %>%
+          mutate(W_pop = ifelse(is.na(W_pop), 0, W_pop))
+        
+        slm_model <- feols(as.formula(paste(outcome_var,
+                           "~ did + W_y + W_did + population_density + W_pop | LSOA11CD + year")),
+          data = slm_data,
+          cluster = ~LSOA11CD)} else {slm_model <- feols(
+          as.formula(paste(outcome_var, "~ did + W_y + W_did | LSOA11CD + year")),
+          data = slm_data,
+          cluster = ~LSOA11CD)}
+      
+      rho <- coef(slm_model)["W_y"]
+      
+      if(!is.na(rho) && abs(rho) < 0.95) {
+        multiplier <- 1 / (1 - rho)
+        weight_results$slm <- list(
+          direct = coef(slm_model)["did"],
+          indirect = coef(slm_model)["W_did"],
+          total = (coef(slm_model)["did"] + coef(slm_model)["W_did"]) * multiplier,
+          rho = rho,
+          multiplier = multiplier,
+          se_direct = se(slm_model)["did"],
+          se_indirect = ifelse("W_did" %in% names(se(slm_model)), se(slm_model)["W_did"], NA))
+        
+        cat("  ✓ SLM: ρ =", round(rho, 3),
+             ", Direct effect =", round(weight_results$slm$direct, 4),
+            ", Indirect effect =", round(weight_results$slm$indirect, 4), "\n")
+      } else {cat("  ✗ SLM: ρ unstable or too large\n")
+      }}, error = function(e) {cat("  ✗ SLM: Estimation failed\n")})
+    
+    tryCatch({
+      pdata <- pdata.frame(spatial_panel, index = c("LSOA11CD", "year"))
+      
+      if(length(unique(pdata$LSOA11CD)) > 3 && length(unique(pdata$year)) > 2) {
+        if(has_pop_density) {
+          sem_model <- spml(
+            as.formula(paste(outcome_var, "~ did + population_density")),
+            data = pdata,
+            listw = W,
+            model = "within",
+            effect = "twoways",
+            spatial.error = "b",
+            lag = FALSE,
+            quiet = TRUE
+          )} else {sem_model <- spml(
+            as.formula(paste(outcome_var, "~ did")),
+            data = pdata,
+            listw = W,
+            model = "within",
+            effect = "twoways",
+            spatial.error = "b",
+            lag = FALSE,
+            quiet = TRUE)}
+        
+        weight_results$sem <- list(
+          coef = tryCatch({
+            coef_val <- coef(sem_model)["did"]
+            if(is.null(coef_val) || length(coef_val) == 0) NA else as.numeric(coef_val)
+          }, error = function(e) NA),
+          lambda = tryCatch({
+            lambda_val <- sem_model$arcoef
+            if(is.null(lambda_val) || length(lambda_val) == 0) {
+              NA} else {as.numeric(lambda_val)[1]
+            }}, error = function(e) NA),
+          se = tryCatch({
+            vcov_diag <- diag(vcov(sem_model))
+            if(is.null(vcov_diag) || !"did" %in% names(vcov_diag)) {
+              NA
+            } else {sqrt(vcov_diag["did"])
+            }}, error = function(e) NA))
+        
+        cat("  ✓ SEM: λ =",
+             tryCatch({if(is.numeric(weight_results$sem$lambda) && !is.na(weight_results$sem$lambda)) {
+                round(weight_results$sem$lambda, 3)
+              } else {"NA"
+              }}, error = function(e) "NA"),
+             ", Coefficient =",
+             tryCatch({
+              if(is.numeric(weight_results$sem$coef) && !is.na(weight_results$sem$coef)) {
+                round(weight_results$sem$coef, 4)
+              } else {"NA"
+              }}, error = function(e) "NA"), "\n")
+      } else {cat("  ✗ SEM: Insufficient data dimensions\n")
+      }}, error = function(e) {
+      cat("  ✗ SEM: Estimation failed\n")})
+    
+    tryCatch({
+      if(exists("slm_data")) {
+        if(has_pop_density) {
+          sdm_model <- feols(as.formula(paste(outcome_var,
+                            "~ did + W_y + W_did + population_density + W_pop | LSOA11CD + year")),
+            data = slm_data,
+            cluster = ~LSOA11CD)
+        } else {sdm_model <- feols(
+            as.formula(paste(outcome_var,
+                            "~ did + W_y + W_did | LSOA11CD + year")),
+            data = slm_data,
+            cluster = ~LSOA11CD)}
+        
+        weight_results$sdm <- list(
+          did = coef(sdm_model)["did"],
+          W_did = ifelse("W_did" %in% names(coef(sdm_model)),
+                         coef(sdm_model)["W_did"], NA),
+          rho = coef(sdm_model)["W_y"],
+          se_did = se(sdm_model)["did"],
+          se_W_did = ifelse("W_did" %in% names(se(sdm_model)),
+                           se(sdm_model)["W_did"], NA))
+        
+        cat("  ✓ SDM: Local effect =", round(weight_results$sdm$did, 4),
+            ", Spatial lag =", round(weight_results$sdm$W_did, 4), "\n")}
+    }, error = function(e) {cat("  ✗ SDM: Estimation failed\n")})
+    
+    spatial_results[[weight_name]] <- weight_results}
+  
+  comparison <- create_detailed_spatial_comparison(spatial_results, weights_eval)
+  
+  cat("\nSpatial effects robustness summary:\n")
+  cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+  if(!is.null(comparison)) {print_spatial_comparison_summary(comparison)}
+  
+  return(list(
+    by_weight = spatial_results,
+    comparison = comparison,
+    weights_evaluation = weights_eval))}
+
+create_detailed_spatial_comparison <- function(spatial_results, weights_eval) {
+  if(is.null(spatial_results) || length(spatial_results) == 0) {
+    return(NULL)}
+  
+  comparison_df <- data.frame()
+  
+  for(weight_name in names(spatial_results)) {
+    weight_res <- spatial_results[[weight_name]]
+    weight_eval_info <- weights_eval[[weight_name]]
+    
+    safe_round <- function(x, digits = 3) {
+      if(is.null(x)) {
+        return(NA)}
+      
+      tryCatch({
+        x_num <- as.numeric(x)
+        if(length(x_num) == 0 || any(is.na(x_num))) {
+          return(NA)
+        }return(round(x_num[1], digits))
+      }, error = function(e) {
+        return(NA)})}
+    
+    safe_get <- function(obj, field1, field2 = NULL) {
+      tryCatch({
+        if(is.null(obj) || !is.list(obj)) {
+          return(NA)
+        }if(is.null(field2)) {
+          return(safe_round(obj[[field1]]))
+        } else {
+          if(is.null(obj[[field1]]) || !is.list(obj[[field1]])) {
+            return(NA)
+          }
+          return(safe_round(obj[[field1]][[field2]]))
+        }}, error = function(e) {
+        return(NA)})}
+    
+    row_data <- data.frame(
+      Weight = weight_name,
+      Weight_Type = "Unknown",
+      Suitability = NA,
+      SLM_Direct = NA,
+      SLM_Direct_SE = NA,
+      SLM_Indirect = NA,
+      SLM_Indirect_SE = NA,
+      SLM_Total = NA,
+      SLM_Rho = NA,
+      SEM_Coef = NA,
+      SEM_SE = NA,
+      SEM_Lambda = NA,
+      SDM_Local = NA,
+      SDM_Local_SE = NA,
+      SDM_Spatial = NA,
+      SDM_Spatial_SE = NA,
+      stringsAsFactors = FALSE)
+    
+    if(!is.null(weight_eval_info)) {
+      if(!is.null(weight_eval_info$type)) {
+        row_data$Weight_Type <- weight_eval_info$type}
+      if(!is.null(weight_eval_info$suitability)) {
+        row_data$Suitability <- weight_eval_info$suitability}}
+    
+    if(!is.null(weight_res$slm) && is.list(weight_res$slm)) {
+      row_data$SLM_Direct <- safe_get(weight_res, "slm", "direct")
+      row_data$SLM_Direct_SE <- safe_get(weight_res, "slm", "se_direct")
+      row_data$SLM_Indirect <- safe_get(weight_res, "slm", "indirect")
+      row_data$SLM_Indirect_SE <- safe_get(weight_res, "slm", "se_indirect")
+      row_data$SLM_Total <- safe_get(weight_res, "slm", "total")
+      row_data$SLM_Rho <- safe_get(weight_res, "slm", "rho")}
+    
+    if(!is.null(weight_res$sem) && is.list(weight_res$sem)) {
+      row_data$SEM_Coef <- safe_get(weight_res, "sem", "coef")
+      row_data$SEM_SE <- safe_get(weight_res, "sem", "se")
+      row_data$SEM_Lambda <- safe_get(weight_res, "sem", "lambda")}
+    
+    if(!is.null(weight_res$sdm) && is.list(weight_res$sdm)) {
+      row_data$SDM_Local <- safe_get(weight_res, "sdm", "did")
+      row_data$SDM_Local_SE <- safe_get(weight_res, "sdm", "se_did")
+      row_data$SDM_Spatial <- safe_get(weight_res, "sdm", "W_did")
+      row_data$SDM_Spatial_SE <- safe_get(weight_res, "sdm", "se_W_did")}
+    
+    comparison_df <- rbind(comparison_df, row_data)}
+  
+  if(nrow(comparison_df) > 0 && "Suitability" %in% names(comparison_df)) {
+    tryCatch({
+      suit_vals <- comparison_df$Suitability
+      suit_vals[is.na(suit_vals)] <- -999
+      suit_order <- order(-suit_vals, comparison_df$Weight)
+      comparison_df <- comparison_df[suit_order, ]
+      comparison_df$Suitability[comparison_df$Suitability == -999] <- NA
+    }, error = function(e) {
+      cat("Warning: Unable to sort by suitability, keeping original order\n")})}
+  
+  return(comparison_df)}
+
+print_spatial_comparison_summary <- function(comparison) {
+  if(is.null(comparison) || nrow(comparison) == 0) {
+    cat("No spatial analysis results available\n")
+    return()}
+  
+  slm_valid <- sum(!is.na(comparison$SLM_Direct) & comparison$SLM_Direct != "NA")
+  sem_valid <- sum(!is.na(comparison$SEM_Coef) & comparison$SEM_Coef != "NA")
+  sdm_valid <- sum(!is.na(comparison$SDM_Local) & comparison$SDM_Local != "NA")
+  
+  cat(sprintf("Valid estimation counts: SLM=%d, SEM=%d, SDM=%d (out of %d weights)\n",
+               slm_valid, sem_valid, sdm_valid, nrow(comparison)))
+  
+  knn5_row <- which(comparison$Weight == "knn_5")
+  knn10_row <- which(comparison$Weight == "knn_10")
+  
+  if(length(knn5_row) > 0 && length(knn10_row) > 0) {
+    cat("\n🔍 KNN-5 vs KNN-10 key comparison:\n")
+    
+    knn5_slm <- tryCatch({
+      val <- comparison$SLM_Direct[knn5_row]
+      if(is.numeric(val) && !is.na(val)) val else NA
+    }, error = function(e) NA)
+    
+    knn10_slm <- tryCatch({
+      val <- comparison$SLM_Direct[knn10_row]
+      if(is.numeric(val) && !is.na(val)) val else NA
+    }, error = function(e) NA)
+    
+    if(!is.na(knn5_slm) && !is.na(knn10_slm)) {
+      mean_val <- mean(c(knn5_slm, knn10_slm))
+      if(abs(mean_val) > 1e-10) {
+        diff_pct <- abs(knn5_slm - knn10_slm) / abs(mean_val) * 100
+        cat(sprintf("SLM direct effects: KNN-5=%.4f, KNN-10=%.4f, difference=%.1f%%\n",
+                     knn5_slm, knn10_slm, diff_pct))
+        
+        if(diff_pct < 10) {
+          cat("✓ Highly consistent results between two KNN weights\n")
+        } else if(diff_pct < 30) {
+          cat("⚠ Moderate differences between two KNN weights\n")
+        } else {
+          cat("✗ Large differences between two KNN weights\n")}}}}
+  
+  if(slm_valid > 1) {
+    tryCatch({
+      slm_effects <- comparison$SLM_Direct[!is.na(comparison$SLM_Direct)]
+      slm_effects <- as.numeric(slm_effects)
+      slm_effects <- slm_effects[!is.na(slm_effects)]
+      
+      if(length(slm_effects) > 1) {
+        slm_range <- max(slm_effects) - min(slm_effects)
+        slm_mean <- mean(slm_effects)
+        
+        if(abs(slm_mean) > 1e-10) {
+          slm_cv <- sd(slm_effects) / abs(slm_mean)
+          
+          cat(sprintf("\nSLM direct effects robustness: range=%.4f, CV=%.3f", slm_range, slm_cv))
+          if(slm_cv < 0.1) {
+            cat(" ✓ Highly robust\n")
+          } else if(slm_cv < 0.3) {
+            cat(" ⚠ Moderately robust\n")
+          } else {cat(" ✗ Not robust\n")}}}
+    }, error = function(e) {
+      cat("\n⚠ Error in robustness calculation\n")})}
+  
+  if("Suitability" %in% names(comparison)) {
+    tryCatch({
+      suit_vals <- comparison$Suitability[!is.na(comparison$Suitability)]
+      if(length(suit_vals) > 0) {
+        max_suit <- max(suit_vals)
+        best_weights <- comparison$Weight[comparison$Suitability == max_suit & !is.na(comparison$Suitability)]
+        cat("Recommended weights:", paste(best_weights, collapse = ", "), "\n")
+      }}, error = function(e) {cat("Recommended weights: Unable to determine\n")})}}
+
+estimate_event_study <- function(panel_data, outcome_var, has_pop_density = FALSE) {
+  event_data <- panel_data %>%
+    mutate(event_time = time_to_intervention,
+      event_time = pmax(pmin(event_time, 4), -4))
+  
+  event_vars <- c()
+  for(t in -4:4) {
+    if(t != -1) {
+      var_name <- paste0("event_", ifelse(t < 0, "m", "p"), abs(ifelse(t == 0, 0, abs(t))))
+      event_data[[var_name]] <- ifelse(event_data$event_time == t &
+                                        event_data$treatment == 1, 1, 0)
+      event_vars <- c(event_vars, var_name)}}
+  
+  if(length(event_vars) > 0) {
+    if(has_pop_density && "population_density" %in% names(event_data)) {
+      event_formula <- paste(outcome_var, "~",
+                            paste(event_vars, collapse = " + "),
+                          "+ population_density",
+                          "| LSOA11CD + year")
+    } else {event_formula <- paste(outcome_var, "~",
+                            paste(event_vars, collapse = " + "),
+                          "| LSOA11CD + year")}
+    
+    tryCatch({event_model <- feols(
+        as.formula(event_formula),
+        data = event_data,
+        cluster = ~LSOA11CD)
+      
+      coefs <- coef(event_model)[event_vars]
+      ses <- se(event_model)[event_vars]
+      
+      return(list(
+        model = event_model,
+        coefs = coefs,
+        ses = ses
+      ))}, error = function(e) {
+      return(NULL)})}
+  
+  return(NULL)}
+
+estimate_heterogeneous_did <- function(panel_data, outcome_var, has_pop_density = FALSE) {
+  if(!"dist_group" %in% names(panel_data)) {
+    return(NULL)}
+  
+  dist_counts <- panel_data %>%
+    filter(treatment == 1) %>%
+    count(dist_group) %>%
+    filter(n > 5)
+  
+  if(nrow(dist_counts) == 0) {
+    return(NULL)}
+  
+  hetero_data <- panel_data
+  valid_groups <- dist_counts$dist_group
+  
+  for(group in valid_groups) {
+    var_name <- paste0("did_", gsub("[^0-9a-zA-Z]", "_", group))
+    hetero_data[[var_name]] <- hetero_data$did * (hetero_data$dist_group == group)}
+  
+  hetero_vars <- paste0("did_", gsub("[^0-9a-zA-Z]", "_", valid_groups))
+  
+  if(has_pop_density && "population_density" %in% names(hetero_data)) {
+    hetero_formula <- paste(outcome_var, "~",
+                            paste(hetero_vars, collapse = " + "),
+                          "+ population_density",
+                          "| LSOA11CD + year")
+  } else {hetero_formula <- paste(outcome_var, "~",
+                            paste(hetero_vars, collapse = " + "),
+                          "| LSOA11CD + year")}
+  
+  tryCatch({hetero_model <- feols(
+      as.formula(hetero_formula),
+      data = hetero_data,
+      cluster = ~LSOA11CD)
+    
+    effects <- coef(hetero_model)[hetero_vars]
+    names(effects) <- valid_groups
+    
+    return(list(
+      model = hetero_model,
+      effects = effects
+    ))}, error = function(e) {
+    return(NULL)})}
+
+estimate_synthetic_control <- function(panel_data, outcome_var, project_name) {
+  n_treated <- length(unique(panel_data$LSOA11CD[panel_data$treatment == 1]))
+  
+  if(n_treated > 15) {return(NULL)}
+  
+  tryCatch({balanced_data <- panel_data %>%
+      group_by(LSOA11CD) %>%
+      filter(n() == max(table(panel_data$LSOA11CD))) %>%
+      ungroup()
+    
+    if(nrow(balanced_data) < 100) {
+      return(NULL)}
+    
+    set.seed(GLOBAL_SEED)
+    
+    gsynth_model <- gsynth(
+      as.formula(paste(outcome_var, "~ did")),
+      data = balanced_data,
+      index = c("LSOA11CD", "year"),
+      force = "two-way",
+      CV = TRUE,
+      r = c(0, min(5, n_treated-1)),
+      inference = "parametric",
+      se = TRUE,
+      nboots = GSYNTH_BOOTS,
+      seed = GLOBAL_SEED,
+      parallel = FALSE)
+    
+    att_avg <- mean(gsynth_model$att.avg, na.rm = TRUE)
+    
+    return(list(model = gsynth_model,
+      att = att_avg
+    ))}, error = function(e) {
+    return(NULL)})}
+
+extract_results <- function(model, var_name, model_type) {
+  tryCatch({
+    if(model_type == "lm") {
+      if(var_name %in% names(coef(model))) {
+        return(list(
+          coef = coef(model)[var_name],
+          se = summary(model)$coefficients[var_name, "Std. Error"],
+          pval = summary(model)$coefficients[var_name, "Pr(>|t|)"]))}
+    } else if(model_type == "feols") {
+      if(var_name %in% names(coef(model))) {
+        return(list(
+          coef = coef(model)[var_name],
+          se = se(model)[var_name],
+          pval = pvalue(model)[var_name]))}}
+    return(list(coef = NA, se = NA, pval = NA))
+  }, error = function(e) {
+    return(list(coef = NA, se = NA, pval = NA))})}
+
+safe_extract <- function(obj, field) {
+  if(is.null(obj) || is.null(obj[[field]])) {
+    return(NA)
+  } else {val <- obj[[field]]
+    if(is.numeric(val) && !is.na(val)) {
+      return(round(val, 3))
+    }return(NA)}}
+
+estimate_robust_methods <- function(panel_data, outcome_var, project_name, intervention_year) {
+  results <- list()
+  
+  tryCatch({dr_data <- panel_data %>%
+      filter(!is.na(!!sym(outcome_var))) %>%
+      mutate(G = ifelse(treatment == 1, intervention_year, 0),
+        id = as.numeric(factor(LSOA11CD)))
+    
+    if(length(unique(dr_data$G[dr_data$G > 0])) > 0) {
+      dr_model <- suppressWarnings(
+        att_gt(yname = outcome_var,
+          tname = "year",
+          idname = "id",
+          gname = "G",
+          data = dr_data,
+          panel = TRUE,
+          allow_unbalanced_panel = TRUE,
+          control_group = "notyettreated",
+          anticipation = 0,
+          clustervars = "id",
+          print_details = FALSE))
+      
+      dr_summary <- aggte(dr_model, type = "simple")
+      
+      results$dr_did <- list(
+        att = dr_summary$overall.att,
+        se = dr_summary$overall.se,
+        pval = 2 * (1 - pnorm(abs(dr_summary$overall.att / dr_summary$overall.se)))
+      )}}, error = function(e) {
+    results$dr_did <- NULL})
+  
+  tryCatch({boot_fun <- function(data, indices) {
+      boot_data <- data[indices,]
+      model <- lm(as.formula(paste(outcome_var, "~ did + treatment + post")),
+                 data = boot_data)
+      return(coef(model)["did"])}
+    
+    set.seed(GLOBAL_SEED)
+    
+    boot_results <- boot(panel_data, boot_fun, R = BOOTSTRAP_REPS)
+    boot_ci <- boot.ci(boot_results, type = "perc")
+    
+    results$bootstrap <- list(
+      estimate = mean(boot_results$t),
+      se = sd(boot_results$t),
+      ci_lower = boot_ci$percent[4],
+      ci_upper = boot_ci$percent[5]
+    )
+  }, error = function(e) {
+    results$bootstrap <- NULL})
+  
+  return(results)}
+
+run_comprehensive_analysis <- function(control_df, treatment_df, project_name, station_data) {
+  cat("\n", rep("═", 50), "\n", sep="")
+  cat("🚀 Starting", project_name, "project improved DID analysis\n")
+  cat(rep("═", 50), "\n")
+  
+  data_prep <- prepare_analysis_data(control_df, treatment_df, project_name, station_data)
+  
+  outcomes <- c("income", "crime_rate", "house_price", "mobility")
+  
+  all_results <- list()
+  
+  for(outcome in outcomes) {
+    cat("\nAnalyzing outcome variable:", outcome, "\n")
+    cat(rep("─", 40), "\n")
+    
+    outcome_results <- list()
+    
+    cat("Executing basic DID estimation...\n")
+    outcome_results$basic_did <- estimate_basic_did(data_prep$panel, outcome, project_name)
+    
+    cat("Executing multi-weight spatial DID estimation...\n")
+    outcome_results$spatial_did <- estimate_spatial_did_multiple_weights(
+      data_prep$panel,
+      data_prep$spatial,
+      outcome,
+      project_name)
+    
+    n_treated <- length(unique(data_prep$panel$LSOA11CD[data_prep$panel$treatment == 1]))
+    
+    if(n_treated <= 15) {
+      cat("Executing synthetic control method...\n")
+      outcome_results$synthetic <- estimate_synthetic_control(
+        data_prep$panel, outcome, project_name)
+    } else {cat("Skipping synthetic control method (treatment group > 15)\n")}
+    
+    cat("Executing robustness checks...\n")
+    outcome_results$robust <- estimate_robust_methods(
+      data_prep$panel, outcome, project_name, data_prep$intervention_year)
+    
+    all_results[[outcome]] <- outcome_results}
+  
+  summary <- create_comprehensive_summary(all_results, outcomes)
+  
+  cat("\n", rep("═", 50), "\n", sep="")
+  cat("✅", project_name, "project analysis completed!\n")
+  cat(rep("═", 50), "\n\n")
+  
+  return(list(
+    data = data_prep,
+    results = all_results,
+    summary = summary))}
+
+create_comprehensive_summary <- function(results, outcomes) {
+  summary_list <- list()
+  
+  for(outcome in outcomes) {
+    if(!is.null(results[[outcome]])) {
+      res <- results[[outcome]]
+      
+      estimates <- data.frame(
+        Outcome = outcome,
+        Simple_DID = safe_extract(res$basic_did$simple, "coef"),
+        Standard_DID = safe_extract(res$basic_did$standard, "coef"),
+        No_COVID = safe_extract(res$basic_did$no_covid, "coef"),
+        stringsAsFactors = FALSE)
+      
+      if(!is.null(res$spatial_did$comparison)) {
+        comparison <- res$spatial_did$comparison
+        if(nrow(comparison) > 0) {
+          best_row <- which.max(comparison$Suitability)
+          if(length(best_row) > 0) {
+            estimates$SLM_Direct <- comparison$SLM_Direct[best_row]
+            estimates$SLM_Indirect <- comparison$SLM_Indirect[best_row]
+            estimates$SEM_Coef <- comparison$SEM_Coef[best_row]
+            estimates$SDM_Local <- comparison$SDM_Local[best_row]
+            estimates$Best_Weight <- comparison$Weight[best_row]}
+          
+          knn5_row <- which(comparison$Weight == "knn_5")
+          knn10_row <- which(comparison$Weight == "knn_10")
+          
+          if(length(knn5_row) > 0) {
+            estimates$KNN5_SLM <- comparison$SLM_Direct[knn5_row]}
+          if(length(knn10_row) > 0) {
+            estimates$KNN10_SLM <- comparison$SLM_Direct[knn10_row]}}}
+      
+      estimates$Synthetic <- safe_extract(res$synthetic, "att")
+      estimates$DR_DID <- safe_extract(res$robust$dr_did, "att")
+      estimates$Bootstrap <- safe_extract(res$robust$bootstrap, "estimate")
+      
+      summary_list[[outcome]] <- estimates}}
+  
+  if(length(summary_list) > 0) {
+    summary_df <- do.call(rbind, summary_list)
+    rownames(summary_df) <- NULL
+    return(summary_df)}
+  
+  return(NULL)}
+
+generate_final_report <- function(nle_results, bre_results) {
+  all_columns <- c("Outcome", "Simple_DID", "Standard_DID", "No_COVID",
+                    "SLM_Direct", "SLM_Indirect", "SEM_Coef", "SDM_Local",
+                    "Best_Weight", "KNN5_SLM", "KNN10_SLM",
+                   "Synthetic", "DR_DID", "Bootstrap", "Project")
+  
+  comparison_table <- NULL
+  
+  if(!is.null(nle_results$summary)) {nle_summary <- nle_results$summary
+    nle_summary$Project <- "NLE"
+    
+    for(col in all_columns) {if(!col %in% names(nle_summary)) {
+        nle_summary[[col]] <- NA}}
+    
+    nle_summary <- nle_summary[, all_columns]
+    comparison_table <- nle_summary}
+  
+  if(!is.null(bre_results$summary)) {
+    bre_summary <- bre_results$summary
+    bre_summary$Project <- "BRE"
+    
+    for(col in all_columns) {if(!col %in% names(bre_summary)) {
+        bre_summary[[col]] <- NA}}
+    
+    bre_summary <- bre_summary[, all_columns]
+    
+    if(!is.null(comparison_table)) {
+      comparison_table <- rbind(comparison_table, bre_summary)
+    } else {comparison_table <- bre_summary}}
+  
+  return(comparison_table)}
+
+save_spatial_comparisons <- function(nle_comprehensive, bre_comprehensive) {
+  spatial_comparison_nle <- NULL
+  spatial_comparison_bre <- NULL
+  
+  if(!is.null(nle_comprehensive$results)) {
+    for(outcome in names(nle_comprehensive$results)) {
+      if(!is.null(nle_comprehensive$results[[outcome]]$spatial_did$comparison)) {
+        temp_df <- nle_comprehensive$results[[outcome]]$spatial_did$comparison
+        temp_df$Project <- "NLE"
+        temp_df$Outcome <- outcome
+        if(is.null(spatial_comparison_nle)) {
+          spatial_comparison_nle <- temp_df
+        } else {spatial_comparison_nle <- rbind(spatial_comparison_nle, temp_df)}}}}
+  
+  if(!is.null(bre_comprehensive$results)) {
+    for(outcome in names(bre_comprehensive$results)) {
+      if(!is.null(bre_comprehensive$results[[outcome]]$spatial_did$comparison)) {
+        temp_df <- bre_comprehensive$results[[outcome]]$spatial_did$comparison
+        temp_df$Project <- "BRE"
+        temp_df$Outcome <- outcome
+        if(is.null(spatial_comparison_bre)) {
+          spatial_comparison_bre <- temp_df
+        } else {spatial_comparison_bre <- rbind(spatial_comparison_bre, temp_df)}}}}
+  
+  all_spatial_comparison <- NULL
+  
+  if(!is.null(spatial_comparison_nle) && !is.null(spatial_comparison_bre)) {
+    common_cols <- intersect(names(spatial_comparison_nle), names(spatial_comparison_bre))
+    if(length(common_cols) > 0) {
+      nle_subset <- spatial_comparison_nle[, common_cols, drop = FALSE]
+      bre_subset <- spatial_comparison_bre[, common_cols, drop = FALSE]
+      all_spatial_comparison <- rbind(nle_subset, bre_subset)}
+  } else if(!is.null(spatial_comparison_nle)) {
+    all_spatial_comparison <- spatial_comparison_nle
+  } else if(!is.null(spatial_comparison_bre)) {
+    all_spatial_comparison <- spatial_comparison_bre}
+  
+  if(!is.null(all_spatial_comparison) && nrow(all_spatial_comparison) > 0) {
+    tryCatch({write_csv(all_spatial_comparison, "comprehensive_did_output/spatial_weights_detailed_comparison.csv")
+      cat("📍 Detailed spatial weight comparison results saved to: comprehensive_did_output/spatial_weights_detailed_comparison.csv\n")
+      
+      if("Weight" %in% names(all_spatial_comparison)) {
+        knn_comparison <- all_spatial_comparison %>%
+          filter(Weight %in% c("knn_5", "knn_10"))
+        
+        if(nrow(knn_comparison) > 0) {knn_cols <- intersect(c("Project", "Outcome", "Weight", "Weight_Type", "Suitability","SLM_Direct", "SLM_Direct_SE", "SLM_Indirect", "SEM_Coef", "SDM_Local"),
+                              names(knn_comparison))
+          if(length(knn_cols) > 0) {knn_subset <- knn_comparison[, knn_cols, drop = FALSE]
+            write_csv(knn_subset, "comprehensive_did_output/knn_weights_comparison.csv")
+            cat("🔍 KNN weights comparison results saved to: comprehensive_did_output/knn_weights_comparison.csv\n")}}
+        
+        if("Weight_Type" %in% names(all_spatial_comparison)) {
+          distance_comparison <- all_spatial_comparison %>%
+            filter(Weight_Type == "Distance")
+          
+          if(nrow(distance_comparison) > 0) {
+            dist_cols <- intersect(c("Project", "Outcome", "Weight", "Weight_Type", "Suitability",
+                                    "SLM_Direct", "SLM_Direct_SE", "SLM_Indirect", "SEM_Coef", "SDM_Local"),
+                                 names(distance_comparison))
+            if(length(dist_cols) > 0) {
+              dist_subset <- distance_comparison[, dist_cols, drop = FALSE]
+              write_csv(dist_subset, "comprehensive_did_output/distance_weights_comparison.csv")
+              cat("📏 Distance weights comparison results saved to: comprehensive_did_output/distance_weights_comparison.csv\n")
+            }}}}}, error = function(e) {
+      cat("⚠️ Error saving spatial comparison results:", e$message, "\n")
+    })} else {cat("⚠️ No spatial comparison results to save\n")}}
+
+
+nle_comprehensive <- run_comprehensive_analysis(
+  control_df = nle_matched_metrics,
+  treatment_df = nle_affected_metrics,
+  project_name = "NLE",
+  station_data = nine_elms_station)
+
+bre_comprehensive <- run_comprehensive_analysis(
+  control_df = bre_matched_metrics,
+  treatment_df = bre_affected_metrics,
+  project_name = "BRE",
+  station_data = bre_station)
+
+final_comparison <- generate_final_report(nle_comprehensive, bre_comprehensive)
+
+if(!dir.exists("comprehensive_did_output")) {
+  dir.create("comprehensive_did_output")}
+
+if(!is.null(final_comparison)) {
+  tryCatch({write_csv(final_comparison, "comprehensive_did_output/all_methods_comparison.csv")
+    cat("\n📊 Final comparison results saved to: comprehensive_did_output/all_methods_comparison.csv\n")}, error = function(e) {
+    cat("\n⚠️ Error saving final comparison results:", e$message, "\n")
+    tryCatch({saveRDS(final_comparison, "comprehensive_did_output/all_methods_comparison.rds")
+      cat("📊 Saved as RDS format: comprehensive_did_output/all_methods_comparison.rds\n")
+    }, error = function(e2) {cat("⚠️ RDS saving also failed:", e2$message, "\n")})})
+} else {cat("\n⚠️ No final comparison results to save\n")}
+
+save_spatial_comparisons(nle_comprehensive, bre_comprehensive)
+
+
+```
+
+# Adding geometry for map
+
+```{r}
+nle_affected_metrics <- st_as_sf(nle_affected_metrics)
+
+bre_affected_metrics <- st_as_sf(bre_affected_metrics)
+```
+
+

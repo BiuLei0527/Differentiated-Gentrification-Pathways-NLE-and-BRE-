@@ -1,0 +1,3 @@
+"0",""
+"0","output_filename <- ""descriptive_statistics.csv"""
+"0","write.csv(descriptive_stats, output_filename, row.names = FALSE)"

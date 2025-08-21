@@ -1,0 +1,83 @@
+"0","population <- read_csv(""/Users/xilver/Downloads/population.csv"",
+               skip = 6,
+               na = c("""", ""NA""),
+               show_col_types = FALSE)
+
+colnames(population)[1] <- ""LSOA_info""
+
+population <- population %>% 
+  filter(!is.na(LSOA_info)) %>% 
+  filter(!str_detect(LSOA_info, ""Column Total"")) %>% 
+  pivot_longer(cols = -LSOA_info, names_to = ""year"", values_to = ""value"") %>% 
+  filter(!is.na(value)) %>% 
+  separate(LSOA_info, into = c(""LSOA_code"", ""LSOA_name""), sep = "" : "") %>% 
+  mutate(year = as.numeric(year))
+
+lsoa_2021 <- st_read(""/Users/xilver/Desktop/CASA0004/qgis_thesis/2021 lsoa-backup.shp"")
+"
+"1","Reading layer `"
+"1","2021 lsoa-backup"
+"1","' from data source "
+"1","
+"
+"1","  "
+"1","`"
+"1","/Users/xilver/Desktop/CASA0004/qgis_thesis/2021 lsoa-backup.shp"
+"1","' "
+"1","using driver `"
+"1","ESRI Shapefile"
+"1","'"
+"1","
+"
+"1","Simple feature collection with 4994 features and 8 fields"
+"1","
+"
+"1","Geometry type: MULTIPOLYGON
+"
+"1","Dimension:     XY
+"
+"1","Bounding box:  "
+"1","xmin: 503568.1 ymin: 155850.8 xmax: 561957.4 ymax: 200933.9"
+"1","
+"
+"1","Projected CRS: OSGB36 / British National Grid
+"
+"0","lsoa_code_2021 <- lsoa_2021$lsoa21cd %>% unique()"
+"0",""
+"0","# Using best lookup"
+"0","lsoa_lookup_2011 <- st_read(""/Users/xilver/Downloads/lookup_2011_2021.geojson"")"
+"1","Reading layer `"
+"1","LSOA_(2011)_to_LSOA_(2021)_to_Local_Authority_District_(2022)_Best_Fit_Lookup_for_EW_(V2)"
+"1","' from data source "
+"1","`"
+"1","/Users/xilver/Downloads/lookup_2011_2021.geojson"
+"1","' "
+"1","using driver `"
+"1","GeoJSON"
+"1","'"
+"1","
+"
+"1","replacing null geometries with empty geometries"
+"1","
+"
+"1","Simple feature collection with 34753 features and 8 fields"
+"1"," (with 34753 geometries empty)"
+"1","
+"
+"1","Geometry type: GEOMETRYCOLLECTION
+"
+"1","Dimension:     XY
+"
+"1","Bounding box:  "
+"1","xmin: NA ymin: NA xmax: NA ymax: NA"
+"1","
+"
+"1","Geodetic CRS:  WGS 84
+"
+"0","london_lookup <- lsoa_lookup_2011 %>%"
+"0","  filter(LSOA21CD %in% lsoa_code_2021)"
+"0",""
+"0","population_2021 <- read_excel(path = ""/Users/xilver/Downloads/sapelsoasyoatablefinal.xlsx"","
+"0","  sheet = ""Mid-2021 LSOA 2021"","
+"0","  skip = 3) %>%"
+"0","  dplyr::select(`LSOA 2021 Code`, `LSOA 2021 Name`, Total) "

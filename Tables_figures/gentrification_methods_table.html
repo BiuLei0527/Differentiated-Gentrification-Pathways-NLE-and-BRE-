@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: 'Arial', 'Helvetica', sans-serif;
+            margin: 20px;
+            background-color: #ffffff;
+        }
+        
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            max-width: 900px;
+            margin: 20px auto;
+            font-size: 11pt;
+            font-family: 'Arial', 'Helvetica', sans-serif;
+        }
+        
+        /* Three-line table style */
+        thead {
+            border-top: 1.5pt solid black;
+            border-bottom: 1pt solid black;
+        }
+        
+        tbody {
+            border-bottom: 1.5pt solid black;
+        }
+        
+        th {
+            font-weight: bold;
+            text-align: left;
+            padding: 8px 12px;
+            vertical-align: bottom;
+        }
+        
+        td {
+            text-align: left;
+            padding: 6px 12px;
+            vertical-align: middle;
+        }
+        
+        /* Remove all internal borders */
+        th, td {
+            border: none;
+        }
+        
+        /* Indentation for method names */
+        .method-name {
+            padding-left: 20px;
+        }
+        
+        /* Selected method indicator */
+        .selected {
+            font-weight: bold;
+        }
+        
+        /* Superscript for notes */
+        .superscript {
+            vertical-align: super;
+            font-size: 0.8em;
+        }
+        
+        /* Notes section */
+        .notes {
+            margin-top: 10px;
+            font-size: 10pt;
+            max-width: 900px;
+            margin-left: auto;
+            margin-right: auto;
+            font-family: 'Arial', 'Helvetica', sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <table>
+        <thead>
+            <tr>
+                <th>Project</th>
+                <th>Method</th>
+                <th>Min</th>
+                <th>Max</th>
+                <th>Range</th>
+                <th>Mean</th>
+                <th>SD</th>
+                <th>Selected</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td rowspan="3" style="vertical-align: middle;">NLE<span class="superscript">a</span></td>
+                <td class="method-name">Percentile</td>
+                <td>18.1</td>
+                <td>79.9</td>
+                <td>61.8</td>
+                <td>49.8</td>
+                <td>14.4</td>
+                <td>—</td>
+            </tr>
+            <tr>
+                <td class="method-name">Min-Max</td>
+                <td>29.6</td>
+                <td>72.7</td>
+                <td>43.1</td>
+                <td>47.5</td>
+                <td>10.5</td>
+                <td>—</td>
+            </tr>
+            <tr>
+                <td class="method-name">Z-score</td>
+                <td>26.7</td>
+                <td>71.1</td>
+                <td>44.4</td>
+                <td>48.6</td>
+                <td>12.3</td>
+                <td class="selected">✓</td>
+            </tr>
+            <tr>
+                <td rowspan="3" style="vertical-align: middle;">BRE<span class="superscript">b</span></td>
+                <td class="method-name">Percentile</td>
+                <td>30.0</td>
+                <td>63.3</td>
+                <td>33.3</td>
+                <td>50.0</td>
+                <td>15.7</td>
+                <td>—</td>
+            </tr>
+            <tr>
+                <td class="method-name">Min-Max</td>
+                <td>30.0</td>
+                <td>62.7</td>
+                <td>32.7</td>
+                <td>52.5</td>
+                <td>15.2</td>
+                <td class="selected">✓</td>
+            </tr>
+            <tr>
+                <td class="method-name">Z-score</td>
+                <td>36.1</td>
+                <td>56.6</td>
+                <td>20.5</td>
+                <td>50.5</td>
+                <td>9.8</td>
+                <td>—</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <div class="notes">
+        <sup>a</sup>NLE: Northern Line Extension (n = 35 LSOAs); <sup>b</sup>BRE: Barking Riverside Extension (n = 4 LSOAs). 
+        SD: Standard deviation. Selection based on sample size: Z-score for large samples (n > 20), Min-Max for small samples (n ≤ 5).
+    </div>
+</body>
+</html>

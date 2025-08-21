@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<style>
+body {
+    background-color: white;
+    font-family: Arial, Helvetica, sans-serif;
+    margin: 20px;
+}
+
+.table-container {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.clean-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11pt;
+    margin: 0 auto;
+}
+
+.clean-table thead th {
+    border-top: 2px solid black;
+    border-bottom: 2px solid black;
+    padding: 8px 10px;
+    text-align: left;
+    font-weight: bold;
+    background-color: white;
+}
+
+.clean-table tbody td {
+    padding: 6px 10px;
+    text-align: left;
+    border: none;
+    background-color: white;
+}
+
+.clean-table tbody tr:last-child td {
+    border-bottom: 2px solid black;
+}
+
+.footnote {
+    font-size: 10pt;
+    margin-top: 10px;
+    text-align: left;
+    font-family: Arial, Helvetica, sans-serif;
+    width: 100%;
+    max-width: 1200px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.table-title {
+    font-size: 12pt;
+    font-weight: bold;
+    margin-bottom: 10px;
+    text-align: center;
+}
+</style>
+</head>
+<body>
+
+<div class="table-container">
+    <div class="table-title">Northern Line Extension (NLE) - Treatment Effects Analysis</div>
+    <table class="clean-table">
+        <thead>
+            <tr>
+                <th>Outcome Variable</th>
+                <th>Simple DID</th>
+                <th>Standard DID</th>
+                <th>No COVID</th>
+                <th>DR-DID</th>
+                <th>Bootstrap</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Income (£/year)</td>
+                <td>1,447.579</td>
+                <td>1,447.235</td>
+                <td>1,324.788</td>
+                <td>1,977.929</td>
+                <td>1,442.158</td>
+            </tr>
+            <tr>
+                <td>Crime Rate</td>
+                <td>0.000</td>
+                <td>0.000</td>
+                <td>0.001</td>
+                <td>−0.009</td>
+                <td>−0.001</td>
+            </tr>
+            <tr>
+                <td>House Price (£)</td>
+                <td>9,028.348</td>
+                <td>9,008.942</td>
+                <td>9,182.995</td>
+                <td>−2,709.800</td>
+                <td>9,122.088</td>
+            </tr>
+            <tr>
+                <td>Mobility Index</td>
+                <td>−0.007</td>
+                <td>−0.007</td>
+                <td>−0.006</td>
+                <td>−0.007</td>
+                <td>−0.006</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <div class="footnote">
+        <p>Notes: Treatment effects for Northern Line Extension project. Sample includes n=35 treated units and n=70 control units over the period 2011-2022, with intervention in 2015. DR = Doubly Robust. Standard errors clustered at LSOA level. All models include year and unit fixed effects. Simple and Standard DID use two-way fixed effects specification.</p>
+    </div>
+</div>
+
+</body>
+</html>

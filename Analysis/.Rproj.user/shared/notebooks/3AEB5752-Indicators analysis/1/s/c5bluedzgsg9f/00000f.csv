@@ -1,0 +1,20 @@
+"0","claimant_count <- read_csv(""/Users/xilver/Downloads/claimant count.csv"",
+               skip = 8,
+               na = c("""", ""NA""),
+               show_col_types = FALSE)
+"
+"2","Warning: [38;5;232mOne or more parsing issues, call `problems()` on your data frame for
+details, e.g.:
+  dat <- vroom(...)
+  problems(dat)[39m"
+"0","colnames(claimant_count)[1] <- ""LSOA_info"""
+"0","claimant_count <- claimant_count %>%"
+"0","  filter(!is.na(LSOA_info)) %>%    "
+"0","  filter(!str_detect(LSOA_info, ""Column Total"")) %>% "
+"0","  pivot_longer(cols = -LSOA_info, names_to = ""month_year"", values_to = ""value"") %>%"
+"0","  filter(!is.na(value)) %>%"
+"0","  separate(LSOA_info, into = c(""LSOA_code"", ""LSOA_name""), sep = "" : "") %>%"
+"0","  mutate(year = as.numeric(str_sub(month_year, -2)) + 2000) %>%"
+"0","  group_by(LSOA_code, LSOA_name, year) %>%"
+"0","  summarise(value = mean(value, na.rm = TRUE), .groups = ""drop"")"
+"0","View(difference_summary)"

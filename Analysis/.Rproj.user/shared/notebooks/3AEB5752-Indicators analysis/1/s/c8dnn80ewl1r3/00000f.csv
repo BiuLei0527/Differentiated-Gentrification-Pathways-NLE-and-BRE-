@@ -1,0 +1,5 @@
+"0","file_path <- ""/Users/xilver/Desktop/CASA0004/Data/income/2019_income.xlsx"""
+"0","income_2019 <- read_excel(file_path, sheet = ""Total annual income"", skip = 4) "
+"0","income_2019 <- income_2019 %>%"
+"0","  filter(`Region name` == ""London"") %>%"
+"0","  dplyr::select( `MSOA code`, `MSOA name`, `Local authority code`, `Local authority name`, `Total annual income (£)`) "

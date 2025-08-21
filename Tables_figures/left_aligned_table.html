@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<style>
+body {
+    background-color: white;
+    font-family: Arial, Helvetica, sans-serif;
+    margin: 20px;
+}
+
+.table-container {
+    width: 100%;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.table-title {
+    font-size: 12pt;
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 15px;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+.clean-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11pt;
+    margin: 0 auto;
+}
+
+.clean-table thead tr:first-child th {
+    border-top: 2px solid black;
+}
+
+.clean-table thead tr:last-child th {
+    border-bottom: 1px solid black;
+}
+
+.clean-table thead th {
+    padding: 8px 10px;
+    text-align: left;
+    font-weight: bold;
+    background-color: white;
+}
+
+.clean-table tbody td {
+    padding: 6px 10px;
+    text-align: left;
+    border: none;
+    background-color: white;
+}
+
+.clean-table tbody tr.section-divider td {
+    padding-top: 12px;
+}
+
+.clean-table tbody tr.subsection-divider td {
+    padding-top: 8px;
+}
+
+.table-bottom-border {
+    border-top: 2px solid black;
+    margin: 0;
+    padding: 0;
+}
+
+.project-header {
+    font-weight: normal;
+    font-style: normal;
+}
+
+.variable-header {
+    font-weight: normal;
+    font-style: normal;
+    padding-left: 20px;
+}
+
+.footnote {
+    margin-top: 10px;
+    font-size: 10pt;
+    text-align: justify;
+    font-family: Arial, Helvetica, sans-serif;
+}
+</style>
+</head>
+<body>
+<div class="table-container">
+    <div class="table-title">Table: Descriptive Statistics for Treatment and Control Groups</div>
+    <table class="clean-table">
+        <thead>
+            <tr>
+                <th rowspan="2">Project</th>
+                <th rowspan="2">Group</th>
+                <th rowspan="2">Variable</th>
+                <th colspan="5" style="text-align: center;">Statistical Measures</th>
+            </tr>
+            <tr>
+                <th>Mean</th>
+                <th>Median</th>
+                <th>SD</th>
+                <th>Min</th>
+                <th>Max</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td rowspan="8" class="project-header">NLE</td>
+                <td rowspan="4">Control</td>
+                <td class="variable-header">Income (£)</td>
+                <td>54,120.09</td>
+                <td>53,862.46</td>
+                <td>10,374.24</td>
+                <td>32,266.34</td>
+                <td>101,788.71</td>
+            </tr>
+            <tr>
+                <td class="variable-header">House Price (£)</td>
+                <td>551,067.70</td>
+                <td>510,250.00</td>
+                <td>249,855.54</td>
+                <td>153,000.00</td>
+                <td>2,768,750.00</td>
+            </tr>
+            <tr>
+                <td class="variable-header">Crime Rate</td>
+                <td>0.09</td>
+                <td>0.07</td>
+                <td>0.08</td>
+                <td>0.00</td>
+                <td>0.65</td>
+            </tr>
+            <tr>
+                <td class="variable-header">Mobility Index</td>
+                <td>0.38</td>
+                <td>0.37</td>
+                <td>0.16</td>
+                <td>0.04</td>
+                <td>0.86</td>
+            </tr>
+            <tr class="subsection-divider">
+                <td rowspan="4">Treatment</td>
+                <td class="variable-header">Income (£)</td>
+                <td>51,699.22</td>
+                <td>50,534.71</td>
+                <td>7,680.32</td>
+                <td>36,847.41</td>
+                <td>71,470.68</td>
+            </tr>
+            <tr>
+                <td class="variable-header">House Price (£)</td>
+                <td>526,508.75</td>
+                <td>472,512.50</td>
+                <td>254,605.93</td>
+                <td>154,000.00</td>
+                <td>1,973,212.50</td>
+            </tr>
+            <tr>
+                <td class="variable-header">Crime Rate</td>
+                <td>0.07</td>
+                <td>0.07</td>
+                <td>0.06</td>
+                <td>0.00</td>
+                <td>0.38</td>
+            </tr>
+            <tr>
+                <td class="variable-header">Mobility Index</td>
+                <td>0.39</td>
+                <td>0.39</td>
+                <td>0.16</td>
+                <td>0.06</td>
+                <td>0.76</td>
+            </tr>
+            <tr class="section-divider">
+                <td rowspan="8" class="project-header">BRE</td>
+                <td rowspan="4">Control</td>
+                <td class="variable-header">Income (£)</td>
+                <td>42,236.99</td>
+                <td>41,834.34</td>
+                <td>5,527.82</td>
+                <td>32,479.75</td>
+                <td>55,993.72</td>
+            </tr>
+            <tr>
+                <td class="variable-header">House Price (£)</td>
+                <td>271,601.43</td>
+                <td>277,875.00</td>
+                <td>84,100.94</td>
+                <td>100,500.00</td>
+                <td>525,000.00</td>
+            </tr>
+            <tr>
+                <td class="variable-header">Crime Rate</td>
+                <td>0.07</td>
+                <td>0.07</td>
+                <td>0.03</td>
+                <td>0.03</td>
+                <td>0.15</td>
+            </tr>
+            <tr>
+                <td class="variable-header">Mobility Index</td>
+                <td>0.26</td>
+                <td>0.27</td>
+                <td>0.13</td>
+                <td>0.04</td>
+                <td>0.58</td>
+            </tr>
+            <tr class="subsection-divider">
+                <td rowspan="4">Treatment</td>
+                <td class="variable-header">Income (£)</td>
+                <td>39,871.10</td>
+                <td>40,556.43</td>
+                <td>5,605.38</td>
+                <td>32,234.08</td>
+                <td>47,997.11</td>
+            </tr>
+            <tr>
+                <td class="variable-header">House Price (£)</td>
+                <td>248,855.57</td>
+                <td>249,997.50</td>
+                <td>67,690.86</td>
+                <td>139,000.00</td>
+                <td>420,722.50</td>
+            </tr>
+            <tr>
+                <td class="variable-header">Crime Rate</td>
+                <td>0.06</td>
+                <td>0.07</td>
+                <td>0.04</td>
+                <td>0.00</td>
+                <td>0.12</td>
+            </tr>
+            <tr>
+                <td class="variable-header">Mobility Index</td>
+                <td>0.34</td>
+                <td>0.32</td>
+                <td>0.19</td>
+                <td>0.05</td>
+                <td>0.74</td>
+            </tr>
+        </tbody>
+    </table>
+    <div class="table-bottom-border"></div>
+    <div class="footnote">
+        Notes: Descriptive statistics for treatment and control groups in the Northern Line Extension (NLE) and Barking Riverside Extension (BRE) projects. Income represents LSOA-level income estimates. House prices are median transaction values. Crime rate is measured per capita. Mobility index ranges from 0 to 1, with higher values indicating greater mobility. SD = Standard Deviation. All monetary values are in British Pounds (£).
+    </div>
+</div>
+</body>
+</html>

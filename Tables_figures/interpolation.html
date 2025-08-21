@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<style>
+body {
+    background-color: white;
+    font-family: Arial, Helvetica, sans-serif;
+    margin: 20px;
+}
+
+.table-container {
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+    margin-bottom: 30px;
+}
+
+.clean-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11pt;
+    margin: 0 auto;
+}
+
+.clean-table thead th {
+    border-top: 2px solid black;
+    border-bottom: 2px solid black;
+    padding: 8px 10px;
+    text-align: left;
+    font-weight: bold;
+    background-color: white;
+}
+
+.clean-table tbody td {
+    padding: 6px 10px;
+    text-align: left;
+    border: none;
+    background-color: white;
+}
+
+.clean-table tbody tr:last-child td {
+    border-bottom: 2px solid black;
+}
+
+.table-title {
+    font-size: 12pt;
+    font-weight: bold;
+    margin-bottom: 10px;
+    text-align: center;
+}
+</style>
+</head>
+<body>
+
+<div class="table-container">
+    <div class="table-title">Missing Data Imputation Methods Comparison</div>
+    <table class="clean-table">
+        <thead>
+            <tr>
+                <th>Method</th>
+                <th>Mean Difference</th>
+                <th>Standard Deviation</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Cubic Spline</td>
+                <td>1,705.058</td>
+                <td>2,086.231</td>
+            </tr>
+            <tr>
+                <td>LOCF Forward</td>
+                <td>−822.188</td>
+                <td>1,987.828</td>
+            </tr>
+            <tr>
+                <td>Linear LOCF</td>
+                <td>0.000</td>
+                <td>0.000</td>
+            </tr>
+            <tr>
+                <td>No Fill</td>
+                <td>0.000</td>
+                <td>0.000</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+</body>
+</html>

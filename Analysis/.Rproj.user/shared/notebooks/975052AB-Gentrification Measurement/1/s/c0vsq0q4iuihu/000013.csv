@@ -1,0 +1,13 @@
+"0","ptal_wide <- ptal_data %>%
+  pivot_wider(names_from = year,
+              values_from = c(PTAL_Value, PTAL_Category),
+              names_prefix = c(""PTAL_Value_"", ""PTAL_Category_""),
+              values_fill = NA)
+"
+"1","[1m[33mError[39m in `tidyr::pivot_wider()`:[22m
+[38;5;232m[33m![38;5;232m `names_prefix` must be a single string, not a character vector.[39m
+Backtrace:
+[90m 1. [39mptal_data %>% ...
+[90m 3. [39m[1msf[22m:::pivot_wider.sf(...)
+[90m 5. [39m[1m[94mtidyr:::pivot_wider.data.frame([39m[22m[1m[95mnames_prefix = names_prefix[39m[22m[1m[94m)[39m[22m
+"

@@ -1,0 +1,1771 @@
+---
+title: "Gentrification Measurement"
+output: html_document
+---
+
+# Importing PTAL data
+
+```{r}
+library(sf)
+library(dplyr)
+library(tidyverse)
+
+files <- c("/Users/xilver/Desktop/temporary/2005_2011_PTAL.shp",
+  "/Users/xilver/Desktop/temporary/2007_2011_PTAL.shp",
+  "/Users/xilver/Desktop/temporary/2010_2011_PTAL.shp",
+  "/Users/xilver/Desktop/temporary/2023_2011_PTAL.shp",
+  "/Users/xilver/Desktop/CASA0004/qgis_thesis/2012 ptal points.shp",
+  "/Users/xilver/Desktop/CASA0004/qgis_thesis/2014 ptal points.shp",
+  "/Users/xilver/Desktop/CASA0004/qgis_thesis/2019 ptal grid.shp",
+  "/Users/xilver/Desktop/CASA0004/qgis_thesis/2020 ptal grid.shp")
+
+classify_ptal <- function(values) {cut(values,
+      breaks = c(-Inf, 0.001, 2.5, 5, 10, 15, 20, 25, 40, Inf),
+      labels = c("0", "1a", "1b", "2", "3", "4", "5", "6a", "6b"),
+      right = FALSE)}
+
+process_file <- function(filepath) {
+  sf_obj <- st_read(filepath, quiet = TRUE)
+  
+  mean_cols <- grep("(_mean|_mea)$", names(sf_obj), value = TRUE)
+  
+  if (length(mean_cols) > 0) {
+    mean_col <- mean_cols[1]
+    cat(paste("Using PTAL column:", mean_col, "\n"))
+    
+    desired_cols <- c("LSOA11CD", "LSOA11NM", "MSOA11CD")
+    existing_cols <- desired_cols[desired_cols %in% names(sf_obj)]
+    
+    if (length(existing_cols) > 0) {
+      selected_cols <- c(existing_cols, mean_col)
+      sf_obj_selected <- sf_obj[, selected_cols]} else {
+      sf_obj_selected <- sf_obj[, mean_col, drop = FALSE]
+      cat("Note: LSOA11CD, LSOA11NM, MSOA11CD columns not found\n")}
+    
+    sf_obj_selected$PTAL_Value <- sf_obj_selected[[mean_col]]
+    sf_obj_selected$PTAL_Category <- classify_ptal(sf_obj_selected$PTAL_Value)
+    
+    cat("Retained columns:", paste(names(sf_obj_selected), collapse = ", "), "\n")
+    } else {cat("Warning: No columns ending with _mean or _mea found\n")
+    
+    alternative_cols <- grep("(mean|mea)", names(sf_obj), ignore.case = TRUE, value = TRUE)
+    if (length(alternative_cols) > 0) {
+      cat("Possible alternative columns found:", paste(alternative_cols, collapse = ", "), "\n")}
+    sf_obj_selected <- sf_obj}
+  return(sf_obj_selected)}
+
+datasets <- list("PTAL 2005" = ptal_2005,
+  "PTAL 2007" = ptal_2007,
+  "PTAL 2010" = ptal_2010,
+  "PTAL 2023" = ptal_2023,
+  "PTAL 2012" = ptal_2012_points,
+  "PTAL 2014" = ptal_2014_points,
+  "PTAL 2019" = ptal_2019_grid,
+  "PTAL 2020" = ptal_2020_grid)
+
+for (name in names(datasets)) {
+  cat(paste("\n", name, ":\n"))
+  if ("PTAL_Category" %in% names(datasets[[name]])) {
+    print(table(datasets[[name]]$PTAL_Category, useNA = "ifany"))
+  } else {cat("Never Find PTAL_Category\n")}}
+
+ptal_2015 <- read.csv("/Users/xilver/Desktop/CASA0004/Data/LSOA2015.csv") %>%
+  dplyr::select(LSOA2011, AvPTAI2015, PTAL) %>%
+  rename(LSOA11CD = LSOA2011,
+         PTAL_Value = AvPTAI2015,
+         PTAL_Category = PTAL)
+
+ptal_data_list <- list(ptal_2005 = ptal_2005,
+  ptal_2007 = ptal_2007,
+  ptal_2015 = ptal_2015,                     
+  ptal_2010 = ptal_2010,
+  ptal_2023 = ptal_2023,
+  ptal_2012_points = ptal_2012_points,
+  ptal_2014_points = ptal_2014_points,
+  ptal_2019_grid = ptal_2019_grid,
+  ptal_2020_grid = ptal_2020_grid)
+
+ptal_data <- bind_rows(lapply(names(ptal_data_list), function(name) {year <- as.integer(gsub("ptal_|_points|_grid", "", name))
+    ptal_data_list[[name]] %>%
+      mutate(year = year) %>%
+      dplyr::select(LSOA11CD, PTAL_Value, PTAL_Category, year)}))
+```
+
+# Importing residential mobility 
+
+```{r}
+data <- read_csv("/Users/xilver/Desktop/CASA0004/Data/residential mobility.csv")
+
+mobility <- data %>%
+  pivot_longer(cols = starts_with("chn"),
+    names_to = "year",
+    values_to = "mobility",
+    names_prefix = "chn",
+    names_transform = list(year = ~ as.integer(.))) %>%
+  filter(area %in% london_lsoas, year >= 2011, year <= 2022)
+```
+
+# Importing crime
+
+```{r}
+library(tidyverse)
+
+crime_data <- read_csv("/Users/xilver/Downloads/crime rate.csv")
+
+crime_long <- crime_data %>%
+  pivot_longer(cols = matches("^[0-9]{6}$"),  # 匹配YYYYMM格式的列
+    names_to = "YearMonth",
+    values_to = "CrimeCount") %>%
+
+  mutate(Year = as.integer(substr(YearMonth, 1, 4))) %>%
+  select(-YearMonth)
+
+crime_annual <- crime_long %>%
+  group_by(`LSOA Code`, `LSOA Name`, Year) %>%
+  summarise(TotalCrimes = sum(CrimeCount, na.rm = TRUE), .groups = "drop")
+
+crime_pop <- population_all_years %>%
+  left_join(crime_annual, by = c("LSOA11CD" = "LSOA Code", "year" = "Year")) %>%
+  mutate("crime rate" = if_else(!is.na(population) & population > 0,
+    (TotalCrimes / population),
+    NA_real_))
+```
+
+# Reading station shapefile
+
+```{r}
+bre_station <- st_read("/Users/xilver/Desktop/CASA0004/qgis_thesis/bre station.shp")
+
+nine_elms_station <- st_read("/Users/xilver/Desktop/CASA0004/qgis_thesis/nine elms station.shp")
+```
+# Preparations for selecting control group
+
+```{r}
+population_wide <- population_all_years %>%
+  pivot_wider(names_from = year,
+              values_from = population,
+              names_prefix = "population_",
+              values_fill = NA)
+
+ptal_wide <- ptal_data %>%
+  st_drop_geometry() %>%
+  pivot_wider(names_from = year,
+              values_from = c(PTAL_Value, PTAL_Category),
+              names_glue = "{.value}_{year}", 
+              values_fill = NA) 
+
+all_control_lsoa <- lsoa_2011 %>%
+  left_join(imd_all, by = "LSOA11CD") %>%
+  left_join(population_wide, by = "LSOA11CD") %>%
+  left_join(ptal_wide, by = "LSOA11CD") %>%
+  dplyr::select(LSOA11CD, LSOA11NM, geometry, area_num,
+                starts_with("imd"),
+                starts_with("population_"),
+                starts_with("PTAL_Value_"),
+                starts_with("PTAL_Category_"))
+
+prepare_did_data <- function() {
+  
+  all_lsoa <- all_control_lsoa
+  nle_lsoas <- nle_affected$LSOA11CD
+  bre_lsoas <- bre_affected$LSOA11CD
+  
+  if(!"dist_to_nle_station" %in% names(all_lsoa)) {
+    
+    lsoa_sf <- all_lsoa %>%
+      st_transform(27700)
+    nle_sf <- nine_elms_station %>%
+      st_transform(27700)
+    bre_sf <- bre_station %>%  
+      st_transform(27700)
+    
+    dist_matrix_nle <- st_distance(lsoa_sf, nle_sf)
+    all_lsoa$dist_to_nle_station <- as.numeric(apply(dist_matrix_nle, 1, min))
+    dist_matrix_bre <- st_distance(lsoa_sf, bre_sf)
+    all_lsoa$dist_to_bre_station <- as.numeric(apply(dist_matrix_bre, 1, min))}
+  
+    cat("Data validation:\n")
+    cat("- Total LSOAs:", nrow(all_lsoa), "\n")
+    cat("- NLE treatment group:", length(nle_lsoas), "LSOAs\n")
+    cat("- BRE treatment group:", length(bre_lsoas), "LSOAs\n")
+    cat("- PTAL 2014 missing:", sum(is.na(all_lsoa$PTAL_Value_2014)), "\n")
+    cat("- IMD 2010 missing:", sum(is.na(all_lsoa$imd2010)), "\n")
+    cat("- Population 2014 missing:", sum(is.na(all_lsoa$population_2014)), "\n")
+  
+  return(list(all_lsoa = all_lsoa,
+    nle_lsoas = nle_lsoas,
+    bre_lsoas = bre_lsoas))}
+```
+
+# Function for selecting control group
+
+```{r}
+library(tidyverse)
+library(MatchIt)
+
+select_controls_improved <- function(all_lsoa, treatment_lsoas,
+                                    project_type, dist_to_station) {
+  
+  if(project_type == "NLE") {
+    intervention_year <- 2015
+    baseline_year <- 2014
+    
+    baseline_data <- all_lsoa %>%
+      mutate(treatment = ifelse(LSOA11CD %in% treatment_lsoas, 1, 0),
+        dist = dist_to_station,
+        
+        ptal_baseline = PTAL_Value_2014,
+        imd_baseline = imd2010,
+        pop_baseline = population_2014,
+        
+        ptal_trend_short = (PTAL_Value_2014 - PTAL_Value_2012)/2,
+        pop_trend_short = (population_2014 - population_2012)/2,
+        
+        ptal_trend_long = (PTAL_Value_2014 - PTAL_Value_2007)/7,
+        imd_trend_long = (imd2010 - imd2004)/6,
+        pop_trend_long = (population_2014 - population_2011)/3)
+    
+  } else if(project_type == "BRE") {
+    baseline_data <- all_lsoa %>%
+      mutate(treatment = ifelse(LSOA11CD %in% treatment_lsoas, 1, 0),
+        dist = dist_to_station,
+        
+        ptal_baseline = PTAL_Value_2015,
+        imd_baseline = imd2015,
+        pop_baseline = population_2015,
+        
+        ptal_trend_short = (PTAL_Value_2015 - PTAL_Value_2014)/1,
+        imd_trend_short = (imd2015 - imd2010)/5,
+        
+        ptal_trend_long = (PTAL_Value_2015 - PTAL_Value_2007)/8,
+        imd_trend_long = (imd2015 - imd2004)/11,
+        pop_trend_long = (population_2015 - population_2011)/4)}
+
+  required_cols <- c(
+    "PTAL_Value_2005", "PTAL_Value_2007", "PTAL_Value_2010", 
+    "PTAL_Value_2012", "PTAL_Value_2014", "PTAL_Value_2015",
+    
+    "imd2004", "imd2007", "imd2010", "imd2015",
+    
+    "population_2011", "population_2012", "population_2013", 
+    "population_2014", "population_2015")
+  
+  existing_cols <- intersect(required_cols, names(baseline_data))
+  missing_cols <- setdiff(required_cols, names(baseline_data))
+  
+  if(length(missing_cols) > 0) {
+    cat("Warning: Missing columns:", paste(missing_cols, collapse=", "), "\n")}
+
+  potential_controls <- baseline_data %>%
+    filter(treatment == 0,
+      dist >= 2000 & dist <= 5000,
+      !is.na(ptal_baseline),
+      !is.na(imd_baseline),
+      !is.na(pop_baseline),
+      !is.na(ptal_trend_long),
+      !is.na(imd_trend_long))
+  
+  cat("Number of potential controls:", nrow(potential_controls), "\n")
+  
+  psm_match <- matchit(
+    treatment ~ ptal_baseline + imd_baseline + log(pop_baseline + 1) +
+                ptal_trend_long + imd_trend_long + pop_trend_long,
+    data = bind_rows(
+      baseline_data %>% filter(treatment == 1),
+      potential_controls),
+    method = "nearest",
+    distance = "logit",
+    ratio = ifelse(sum(baseline_data$treatment == 1) <= 3, 10,
+                   ifelse(sum(baseline_data$treatment == 1) <= 10, 5, 3)),
+    caliper = 0.2,
+    replace = FALSE)
+  
+  matched_data <- match.data(psm_match)
+  
+  cat(project_type, "Matching:\n")
+  cat("- Treatment group:", sum(matched_data$treatment == 1), "LSOA\n")
+  cat("- Control group:", sum(matched_data$treatment == 0), "LSOA\n")
+  cat("- Actual ratio: 1:",
+      round(sum(matched_data$treatment == 0) / sum(matched_data$treatment == 1), 1), "\n\n")
+
+  return(matched_data)}
+```
+
+# Validating parallel trend
+
+```{r}
+check_parallel_trends <- function(matched_data, project_type) {
+  
+  if(project_type == "NLE") {
+    
+    trends <- matched_data %>%
+      group_by(treatment) %>%
+      summarise(
+        # PTAL Trend（2005, 2007, 2010, 2012, 2014）
+        ptal_2005_mean = mean(PTAL_Value_2005, na.rm = TRUE),
+        ptal_2007_mean = mean(PTAL_Value_2007, na.rm = TRUE),
+        ptal_2010_mean = mean(PTAL_Value_2010, na.rm = TRUE),
+        ptal_2012_mean = mean(PTAL_Value_2012, na.rm = TRUE),
+        ptal_2014_mean = mean(PTAL_Value_2014, na.rm = TRUE),
+        
+        # IMD Trend（2004, 2007, 2010）
+        imd_2004_mean = mean(imd2004, na.rm = TRUE),
+        imd_2007_mean = mean(imd2007, na.rm = TRUE),
+        imd_2010_mean = mean(imd2010, na.rm = TRUE),
+        
+        # Population Trend（2011-2014）
+        pop_2011_mean = mean(population_2011, na.rm = TRUE),
+        pop_2012_mean = mean(population_2012, na.rm = TRUE),
+        pop_2013_mean = mean(population_2013, na.rm = TRUE),
+        pop_2014_mean = mean(population_2014, na.rm = TRUE),
+        .groups = "drop")
+    
+    ptal_trend_diff_long = (trends$ptal_2014_mean[trends$treatment==1] - 
+                            trends$ptal_2007_mean[trends$treatment==1]) - 
+                           (trends$ptal_2014_mean[trends$treatment==0] - 
+                            trends$ptal_2007_mean[trends$treatment==0])
+    
+    imd_trend_diff_long = (trends$imd_2010_mean[trends$treatment==1] - 
+                           trends$imd_2004_mean[trends$treatment==1]) - 
+                          (trends$imd_2010_mean[trends$treatment==0] - 
+                           trends$imd_2004_mean[trends$treatment==0])
+    
+  } else if(project_type == "BRE") {
+    trends <- matched_data %>%
+      group_by(treatment) %>%
+      summarise(
+        # PTAL Trend（2005, 2007, 2010, 2012, 2014, 2015）
+        ptal_2005_mean = mean(PTAL_Value_2005, na.rm = TRUE),
+        ptal_2007_mean = mean(PTAL_Value_2007, na.rm = TRUE),
+        ptal_2010_mean = mean(PTAL_Value_2010, na.rm = TRUE),
+        ptal_2012_mean = mean(PTAL_Value_2012, na.rm = TRUE),
+        ptal_2014_mean = mean(PTAL_Value_2014, na.rm = TRUE),
+        ptal_2015_mean = mean(PTAL_Value_2015, na.rm = TRUE),
+        
+        # IMD Trend（2004, 2007, 2010, 2015）
+        imd_2004_mean = mean(imd2004, na.rm = TRUE),
+        imd_2007_mean = mean(imd2007, na.rm = TRUE),
+        imd_2010_mean = mean(imd2010, na.rm = TRUE),
+        imd_2015_mean = mean(imd2015, na.rm = TRUE),
+        
+        # Population Trend（2011-2015）
+        pop_2011_mean = mean(population_2011, na.rm = TRUE),
+        pop_2012_mean = mean(population_2012, na.rm = TRUE),
+        pop_2013_mean = mean(population_2013, na.rm = TRUE),
+        pop_2014_mean = mean(population_2014, na.rm = TRUE),
+        pop_2015_mean = mean(population_2015, na.rm = TRUE),
+        .groups = "drop")
+    
+    ptal_trend_diff_long = (trends$ptal_2015_mean[trends$treatment==1] - 
+                           trends$ptal_2007_mean[trends$treatment==1]) - 
+                          (trends$ptal_2015_mean[trends$treatment==0] - 
+                           trends$ptal_2007_mean[trends$treatment==0])
+    
+    imd_trend_diff_long = (trends$imd_2015_mean[trends$treatment==1] - 
+                          trends$imd_2004_mean[trends$treatment==1]) - 
+                         (trends$imd_2015_mean[trends$treatment==0] - 
+                          trends$imd_2004_mean[trends$treatment==0]) }
+  
+  cat("\nParallel Trends Test Results:\n")
+  cat("=====================================\n")
+  cat("PTAL long-term trend difference:", round(ptal_trend_diff_long, 3), "\n")
+  cat("IMD long-term trend difference:", round(imd_trend_diff_long, 3), "\n")
+  
+  ptal_pass <- abs(ptal_trend_diff_long) < 0.5
+  imd_pass <- abs(imd_trend_diff_long) < 5
+
+  ptal_marginal <- abs(ptal_trend_diff_long) >= 0.5 & abs(ptal_trend_diff_long) < 1
+  imd_marginal <- abs(imd_trend_diff_long) >= 5 & abs(imd_trend_diff_long) < 10
+  
+  if(ptal_pass & imd_pass) {
+    cat("✓ Parallel trends assumption satisfied\n")
+    parallel_satisfied <- TRUE} else if(ptal_marginal || imd_marginal) {
+    cat("⚠ Parallel trends marginally violated\n")
+    cat("  Interpretation: Results should be interpreted with caution\n")
+    
+    if(!ptal_pass) {
+      cat("  - PTAL trend difference:", round(ptal_trend_diff_long, 3), 
+          "(threshold: 0.5)\n")}
+    if(!imd_pass) {
+      cat("  - IMD trend difference:", round(imd_trend_diff_long, 3), 
+          "(threshold: 5)\n")}
+    
+    cat("\nRecommendations:\n")
+    cat("  1. Include pre-treatment trends as controls in DID\n")
+    cat("  2. Consider using event study specification\n")
+    cat("  3. Report results with appropriate caveats\n")
+    
+    parallel_satisfied <- FALSE} else {
+    cat("✗ Parallel trends assumption violated\n")
+    cat("  Consider alternative identification strategies\n")
+    parallel_satisfied <- FALSE}
+
+if(abs(ptal_trend_diff_long) < 0.5 & abs(imd_trend_diff_long) < 5) {
+  cat("✓ Parallel trends assumption satisfied\n")
+  parallel_satisfied <- TRUE} else {
+  cat("⚠️ Parallel trends assumption may not be satisfied\n")
+  parallel_satisfied <- FALSE}
+
+plot_trends(trends, project_type)
+
+return(list(trends = trends,
+  ptal_diff = ptal_trend_diff_long,
+  imd_diff = imd_trend_diff_long,
+  parallel_satisfied = parallel_satisfied))}
+
+plot_trends <- function(trends, project_type) {
+  
+  library(ggplot2)
+  library(tidyr)
+  library(scales)
+  library(patchwork)
+  
+  select <- dplyr::select
+  
+  theme_academic <- theme_bw() +
+    theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30"),
+      axis.title = element_text(size = 11, face = "bold"),
+      axis.text = element_text(size = 10),
+     
+      legend.title = element_text(size = 10, face = "bold"),
+      legend.text = element_text(size = 9),
+      legend.position = "bottom",
+      legend.background = element_rect(fill = "white", color = "gray80"),
+  
+      panel.grid.major = element_line(color = "gray90", size = 0.3),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(color = "gray20", size = 1),
+   
+      plot.background = element_rect(fill = "white"),
+      panel.background = element_rect(fill = "white"))
+
+  academic_colors <- c("Treatment" = "#D62728",
+    "Control" = "#1F77B4" )
+
+  intervention_year <- ifelse(project_type == "NLE", 2015, 2016)
+  
+  
+  ptal_long <- trends %>%
+    select(treatment, starts_with("ptal_")) %>%
+    pivot_longer(
+      cols = starts_with("ptal_"),
+      names_to = "year",
+      values_to = "ptal") %>%
+    mutate( year = as.numeric(str_extract(year, "\\d{4}")),
+      Group = factor(ifelse(treatment == 1, "Treatment", "Control"),
+                    levels = c("Treatment", "Control"))) %>%
+    filter(!is.na(ptal))
+
+  ptal_summary <- ptal_long %>%
+    group_by(year, Group) %>%
+    summarise(
+      mean_ptal = mean(ptal, na.rm = TRUE),
+      se_ptal = sd(ptal, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop")
+  
+  p_ptal <- ggplot(ptal_summary, aes(x = year, y = mean_ptal, color = Group)) +
+
+    geom_ribbon(aes(ymin = mean_ptal - 1.96*se_ptal, 
+                   ymax = mean_ptal + 1.96*se_ptal,
+                   fill = Group),
+               alpha = 0.15, color = NA) +
+
+    geom_line(size = 1.2) +
+
+    geom_point(size = 3, shape = 19) +
+
+    geom_vline(xintercept = intervention_year - 0.5,
+               linetype = "dashed", 
+               color = "gray40", 
+               size = 0.8,
+               alpha = 0.8) +
+
+    annotate("text", 
+            x = intervention_year - 0.5, 
+            y = max(ptal_summary$mean_ptal) * 0.95,
+            label = paste(project_type, "Intervention"),
+            angle = 90, 
+            vjust = -0.5,
+            size = 3.5,
+            color = "gray40") +
+
+    labs(title = paste0("Figure 1: Pre-treatment PTAL Trends - ", project_type),
+      subtitle = "Public Transport Accessibility Level (2005-2015)",
+      x = "Year",
+      y = "Mean PTAL Score",
+      color = "Group",
+      fill = "Group") +
+
+    scale_color_manual(values = academic_colors) +
+    scale_fill_manual(values = academic_colors) +
+
+    scale_x_continuous(breaks = seq(2005, 2015, by = 2),
+      limits = c(2004.5, max(ptal_summary$year) + 0.5)) +
+    
+    scale_y_continuous(labels = number_format(accuracy = 0.1)) +
+
+    theme_academic
+  
+  imd_long <- trends %>%
+    select(treatment, starts_with("imd_")) %>%
+    pivot_longer(cols = starts_with("imd_"),
+      names_to = "year",
+      values_to = "imd") %>%
+    mutate(year = as.numeric(str_extract(year, "\\d{4}")),
+      Group = factor(ifelse(treatment == 1, "Treatment", "Control"),
+                    levels = c("Treatment", "Control"))) %>%
+    filter(!is.na(imd))
+  
+  imd_summary <- imd_long %>%
+    group_by(year, Group) %>%
+    summarise(
+      mean_imd = mean(imd, na.rm = TRUE),
+      se_imd = sd(imd, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop")
+  
+  p_imd <- ggplot(imd_summary, aes(x = year, y = mean_imd, color = Group)) +
+    geom_ribbon(aes(ymin = mean_imd - 1.96*se_imd, 
+                   ymax = mean_imd + 1.96*se_imd,
+                   fill = Group),
+               alpha = 0.15, color = NA) +
+    geom_line(size = 1.2) +
+    geom_point(size = 3, shape = 19) +
+    geom_vline(xintercept = intervention_year - 0.5,
+               linetype = "dashed", 
+               color = "gray40", 
+               size = 0.8,
+               alpha = 0.8) +
+    annotate("text", 
+            x = intervention_year - 0.5, 
+            y = max(imd_summary$mean_imd) * 0.95,
+            label = paste(project_type, "Intervention"),
+            angle = 90, 
+            vjust = -0.5,
+            size = 3.5,
+            color = "gray40") +
+    labs(title = paste0("Figure 2: Pre-treatment IMD Trends - ", project_type),
+      subtitle = "Index of Multiple Deprivation (2004-2015)",
+      x = "Year",
+      y = "Mean IMD Score",
+      color = "Group",
+      fill = "Group") +
+    scale_color_manual(values = academic_colors) +
+    scale_fill_manual(values = academic_colors) +
+    scale_x_continuous(
+      breaks = seq(2004, 2015, by = 2),
+      limits = c(2003.5, max(imd_summary$year) + 0.5)) +
+    scale_y_continuous(labels = number_format(accuracy = 0.1)) +
+    theme_academic
+  
+  pop_long <- trends %>%
+    select(treatment, starts_with("pop_")) %>%
+    pivot_longer(cols = starts_with("pop_"),
+      names_to = "year",
+      values_to = "population") %>%
+    mutate(year = as.numeric(str_extract(year, "\\d{4}")),
+      Group = factor(ifelse(treatment == 1, "Treatment", "Control"),
+                    levels = c("Treatment", "Control"))) %>%
+    filter(!is.na(population))
+  
+  pop_summary <- pop_long %>%
+    group_by(year, Group) %>%
+    summarise(mean_pop = mean(population, na.rm = TRUE),
+      se_pop = sd(population, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop")
+  
+  p_pop <- ggplot(pop_summary, aes(x = year, y = mean_pop, color = Group)) +
+    geom_ribbon(aes(ymin = mean_pop - 1.96*se_pop, 
+                   ymax = mean_pop + 1.96*se_pop,
+                   fill = Group),
+               alpha = 0.15, color = NA) +
+    geom_line(size = 1.2) +
+    geom_point(size = 3, shape = 19) +
+    geom_vline(xintercept = intervention_year - 0.5,
+               linetype = "dashed", 
+               color = "gray40", 
+               size = 0.8,
+               alpha = 0.8) +
+    annotate("text", 
+            x = intervention_year - 0.5, 
+            y = max(pop_summary$mean_pop) * 0.95,
+            label = paste(project_type, "Intervention"),
+            angle = 90, 
+            vjust = -0.5,
+            size = 3.5,
+            color = "gray40") +
+    labs(title = paste0("Figure 3: Pre-treatment Population Trends - ", project_type),
+      subtitle = "Average LSOA Population (2011-2015)",
+      x = "Year",
+      y = "Mean Population",
+      color = "Group",
+      fill = "Group") +
+    scale_color_manual(values = academic_colors) +
+    scale_fill_manual(values = academic_colors) +
+    scale_x_continuous(breaks = seq(2011, 2015, by = 1),
+      limits = c(2010.5, max(pop_summary$year) + 0.5)) +
+    scale_y_continuous(labels = comma_format()) + theme_academic
+  
+  combined_plot <- (p_ptal / p_imd / p_pop) +
+    plot_layout(guides = "collect") +
+    plot_annotation(
+      title = paste("Parallel Trends Test:", project_type, "Extension"),
+      subtitle = "Comparison of Treatment and Control Groups Before Intervention",
+      caption = "Note: Shaded areas represent 95% confidence intervals. Vertical dashed line indicates intervention timing.",
+      theme = theme(
+        plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(size = 12, hjust = 0.5, color = "gray30"),
+        plot.caption = element_text(size = 9, hjust = 0, color = "gray40", 
+                                   margin = margin(t = 10))))
+  
+  if(!dir.exists("figures")) dir.create("figures")
+  
+  ggsave(filename = paste0("figures/", tolower(project_type), "_ptal_trends.png"),
+    plot = p_ptal,
+    width = 10,
+    height = 6,
+    dpi = 300,
+    bg = "white")
+  
+  ggsave(filename = paste0("figures/", tolower(project_type), "_imd_trends.png"),
+    plot = p_imd,
+    width = 10,
+    height = 6,
+    dpi = 300,
+    bg = "white")
+  
+  ggsave(filename = paste0("figures/", tolower(project_type), "_pop_trends.png"),
+    plot = p_pop,
+    width = 10,
+    height = 6,
+    dpi = 300,
+    bg = "white")
+  
+  ggsave(filename = paste0("figures/", tolower(project_type), "_parallel_trends_combined.png"),
+    plot = combined_plot,
+    width = 12,
+    height = 14,
+    dpi = 300,
+    bg = "white")
+  
+  ggsave(filename = paste0("figures/", tolower(project_type), "_parallel_trends_combined.pdf"),
+    plot = combined_plot,
+    width = 12,
+    height = 14,
+    device = cairo_pdf,
+    bg = "white")
+  
+
+  print(combined_plot)
+  
+  cat("\nFigures saved to 'figures/' directory:\n")
+  cat("- PNG files (300 dpi) for presentations\n")
+  cat("- PDF file for academic publication\n")
+  
+  return(invisible(list(
+    ptal = p_ptal,
+    imd = p_imd,
+    population = p_pop,
+    combined = combined_plot)))}
+
+```
+
+# Complete executing procedures 
+
+```{r}
+data <- prepare_did_data()
+
+cat("\n--- NLE Control Group Selection ---\n")
+nle_matched <- select_controls_improved(
+  all_lsoa = data$all_lsoa,
+  treatment_lsoas = data$nle_lsoas,
+  project_type = "NLE",
+  dist_to_station = data$all_lsoa$dist_to_nle_station)
+
+n_bre_treated <- length(data$bre_lsoas)
+cat("BRE treatment group size:", n_bre_treated, "LSOA(s)\n")
+
+if(n_bre_treated <= 3) {
+  
+  cat("Small sample detected - will attempt PSM first\n\n")
+
+  bre_baseline <- data$all_lsoa %>%
+    mutate(treatment = ifelse(LSOA11CD %in% data$bre_lsoas, 1, 0),
+      dist = dist_to_bre_station,
+      ptal_baseline = PTAL_Value_2015,
+      imd_baseline = imd2015,
+      pop_baseline = population_2015,
+
+      ptal_trend = ifelse(!is.na(PTAL_Value_2015) & !is.na(PTAL_Value_2014),
+                         PTAL_Value_2015 - PTAL_Value_2014, NA),
+      imd_trend = ifelse(!is.na(imd2015) & !is.na(imd2010),
+                        (imd2015 - imd2010)/5, NA))
+  
+  treatment_info <- bre_baseline %>%
+    filter(treatment == 1) %>%
+    summarise(mean_ptal = mean(ptal_baseline, na.rm = TRUE),
+      mean_imd = mean(imd_baseline, na.rm = TRUE),
+      mean_pop = mean(pop_baseline, na.rm = TRUE),
+      sd_ptal = sd(ptal_baseline, na.rm = TRUE),
+      sd_imd = sd(imd_baseline, na.rm = TRUE))
+  
+  cat("Treatment group characteristics:\n")
+  cat("  PTAL: Mean =", round(treatment_info$mean_ptal, 2), 
+      "SD =", round(treatment_info$sd_ptal, 2), "\n")
+  cat("  IMD: Mean =", round(treatment_info$mean_imd, 2),
+      "SD =", round(treatment_info$sd_imd, 2), "\n")
+  cat("  Population: Mean =", round(treatment_info$mean_pop, 0), "\n\n")
+ 
+  search_radius <- c(2000, 8000)
+  
+  bre_potential <- bre_baseline %>%
+    filter(treatment == 0,
+      dist >= search_radius[1] & dist <= search_radius[2],
+      !is.na(ptal_baseline),
+      !is.na(imd_baseline),
+      !is.na(pop_baseline))
+  
+  cat("Searching in", search_radius[1]/1000, "-", search_radius[2]/1000, "km range\n")
+  cat("Potential controls found:", nrow(bre_potential), "LSOAs\n")
+  
+  min_controls_needed <- n_bre_treated * 20
+  
+  if(nrow(bre_potential) < min_controls_needed) {
+    cat("Expanding search to 2-10km for more options...\n")
+    search_radius[2] <- 10000
+    
+    bre_potential <- bre_baseline %>%
+      filter(treatment == 0,
+        dist >= search_radius[1] & dist <= search_radius[2],
+        !is.na(ptal_baseline),
+        !is.na(imd_baseline),
+        !is.na(pop_baseline))
+    cat("Extended search found:", nrow(bre_potential), "LSOAs\n")}
+  
+  psm_success <- FALSE
+  bre_matched <- NULL
+
+  model_specs <- list(
+    full = list(formula = treatment ~ ptal_baseline + imd_baseline + log(pop_baseline + 1),
+      name = "Full model (PTAL + IMD + Population)"),
+    reduced = list(formula = treatment ~ ptal_baseline + imd_baseline,
+      name = "Reduced model (PTAL + IMD)"),
+    minimal = list(formula = treatment ~ ptal_baseline,
+      name = "Minimal model (PTAL only)"))
+
+  if(n_bre_treated == 1) {
+    match_ratio <- 10
+    caliper_val <- 0.5
+    replace_val <- TRUE
+    cat("Matching parameters: ratio=1:10, caliper=0.5, replace=TRUE\n")
+  } else if(n_bre_treated == 2) {
+    match_ratio <- 5
+    caliper_val <- 0.3
+    replace_val <- TRUE
+    cat("Matching parameters: ratio=1:5, caliper=0.3, replace=TRUE\n")
+  } else {match_ratio <- 4
+    caliper_val <- 0.25
+    replace_val <- FALSE
+    cat("Matching parameters: ratio=1:4, caliper=0.25, replace=FALSE\n")}
+  
+  for(model_id in names(model_specs)) {
+    cat("\nTrying:", model_specs[[model_id]]$name, "\n")
+    
+    psm_result <- tryCatch({
+      
+      bre_pool <- bind_rows(
+        bre_baseline %>% filter(treatment == 1),
+        bre_potential)
+      
+      bre_match <- matchit(
+        model_specs[[model_id]]$formula,
+        data = bre_pool,
+        method = "nearest",
+        distance = "logit",
+        ratio = match_ratio,
+        caliper = caliper_val,
+        replace = replace_val)
+      
+      matched_temp <- match.data(bre_match)
+      n_matched_controls <- sum(matched_temp$treatment == 0)
+
+      if(n_matched_controls >= n_bre_treated) {
+        cat("  ✓ SUCCESS: Matched", n_matched_controls, "controls\n")
+        
+        balance_stats <- matched_temp %>%
+          group_by(treatment) %>%
+          summarise(
+            mean_ptal = mean(ptal_baseline, na.rm = TRUE),
+            mean_imd = mean(imd_baseline, na.rm = TRUE),
+            .groups = "drop")
+        
+        smd_ptal <- abs(diff(balance_stats$mean_ptal)) / 
+                    sd(matched_temp$ptal_baseline, na.rm = TRUE)
+        smd_imd <- abs(diff(balance_stats$mean_imd)) / 
+                   sd(matched_temp$imd_baseline, na.rm = TRUE)
+        
+        cat("  Balance: SMD_PTAL =", round(smd_ptal, 3), 
+            "SMD_IMD =", round(smd_imd, 3), "\n")
+        
+        list(success = TRUE, data = matched_temp, 
+             smd_ptal = smd_ptal, smd_imd = smd_imd, model = model_id)
+      } else {cat("  ✗ Insufficient matches (only", n_matched_controls, "controls)\n")
+        list(success = FALSE)
+      }}, error = function(e) {
+      error_msg <- substr(gsub("\n", " ", e$message), 1, 60)
+      cat("  ✗ Error:", error_msg, "...\n")
+      list(success = FALSE)})
+
+    if(psm_result$success) {
+      bre_matched <- psm_result$data
+      psm_success <- TRUE
+      psm_smd_ptal <- psm_result$smd_ptal
+      psm_smd_imd <- psm_result$smd_imd
+      cat("\nPSM successful with", model_id, "model\n")
+      break}}
+  
+  if(psm_success) {
+    cat("\n--- Checking PSM Quality ---\n")
+    cat("SMD_PTAL =", round(psm_smd_ptal, 3), "\n")
+    cat("SMD_IMD =", round(psm_smd_imd, 3), "\n")
+    
+    if(psm_smd_ptal > 0.25 || psm_smd_imd > 0.25) {
+      cat("\n⚠ Warning: Poor balance achieved with PSM\n")
+      
+      if(psm_smd_imd > 0.5) {
+        cat("SMD_IMD > 0.5 - Switching to exact matching on IMD...\n")
+        
+        bre_potential_exact <- bre_potential %>%
+          mutate(imd_diff = abs(imd_baseline - treatment_info$mean_imd),
+            ptal_diff = abs(ptal_baseline - treatment_info$mean_ptal)) %>%
+
+          arrange(imd_diff, ptal_diff) %>%
+          slice_head(n = n_bre_treated * ifelse(n_bre_treated == 1, 10, 5))
+        
+        bre_matched <- bind_rows(bre_baseline %>% filter(treatment == 1),
+          bre_potential_exact %>% mutate(treatment = 0))
+ 
+        balance_stats_new <- bre_matched %>%
+          group_by(treatment) %>%
+          summarise(
+            mean_ptal = mean(ptal_baseline, na.rm = TRUE),
+            mean_imd = mean(imd_baseline, na.rm = TRUE),
+            .groups = "drop")
+        
+        smd_ptal_new <- abs(diff(balance_stats_new$mean_ptal)) / 
+                        sd(bre_matched$ptal_baseline, na.rm = TRUE)
+        smd_imd_new <- abs(diff(balance_stats_new$mean_imd)) / 
+                       sd(bre_matched$imd_baseline, na.rm = TRUE)
+        
+        cat("\nRe-matched using exact IMD matching:\n")
+        cat("New SMD_PTAL =", round(smd_ptal_new, 3), "\n")
+        cat("New SMD_IMD =", round(smd_imd_new, 3), "\n")
+        
+        psm_success <- FALSE } else {
+        cat("Balance is marginal but acceptable\n")
+        cat("Recommend interpreting results with caution\n")
+      }} else {cat("✓ Good balance achieved (SMD < 0.25)\n")}}
+  
+  if(!psm_success && is.null(bre_matched)) {
+    cat("\n--- PSM failed, using Direct Similarity Matching ---\n")
+
+    bre_potential <- bre_potential %>%
+      mutate(ptal_diff = abs(ptal_baseline - treatment_info$mean_ptal) / 
+                    sd(bre_baseline$ptal_baseline, na.rm = TRUE),
+        imd_diff = abs(imd_baseline - treatment_info$mean_imd) / 
+                   sd(bre_baseline$imd_baseline, na.rm = TRUE),
+        pop_diff = abs(log(pop_baseline + 1) - log(treatment_info$mean_pop + 1)) / 
+                   sd(log(bre_baseline$pop_baseline + 1), na.rm = TRUE),
+   
+        total_distance = ptal_diff * 0.4 + imd_diff * 0.4 + pop_diff * 0.2) %>%
+      arrange(total_distance)
+
+    n_controls_target <- n_bre_treated * ifelse(n_bre_treated == 1, 10, 5)
+    n_controls_selected <- min(n_controls_target, nrow(bre_potential))
+    
+    selected_controls <- bre_potential %>%
+      slice_head(n = n_controls_selected)
+    
+    bre_matched <- bind_rows(bre_baseline %>% filter(treatment == 1),
+      selected_controls %>% mutate(treatment = 0))
+    
+    cat("Selected", n_controls_selected, "most similar controls\n")
+    cat("Average distance:", round(mean(selected_controls$total_distance), 3), "\n")}
+  
+  cat("\n--- BRE Final Matching Summary ---\n")
+  cat("Treatment units:", sum(bre_matched$treatment == 1), "\n")
+  cat("Control units:", sum(bre_matched$treatment == 0), "\n")
+  cat("Final ratio: 1:", round(sum(bre_matched$treatment == 0)/sum(bre_matched$treatment == 1), 1), "\n")
+  
+  if(n_bre_treated == 1) {
+    cat("\n⚠ Single treatment unit detected\n")
+    cat("Recommendations:\n")
+    cat("  1. Consider Synthetic Control Method (see code below)\n")
+    cat("  2. Interpret as case study, not causal effect\n")
+    cat("  3. Report with appropriate caveats\n")}
+  } else {cat("Standard sample size - using regular PSM\n")
+  bre_matched <- select_controls_improved(
+    all_lsoa = data$all_lsoa,
+    treatment_lsoas = data$bre_lsoas,
+    project_type = "BRE",
+    dist_to_station = data$all_lsoa$dist_to_bre_station)}
+
+nle_trends <- check_parallel_trends(nle_matched, "NLE")
+
+if(n_bre_treated > 1) {
+  tryCatch({bre_trends <- check_parallel_trends(bre_matched, "BRE")}, error = function(e) {
+    cat("\nBRE parallel trends test failed - sample too small\n")})
+} else {cat("\nBRE: Cannot test parallel trends with single unit\n")
+  cat("Alternative: Use pre-treatment fit from synthetic control\n")}
+
+
+if(!dir.exists("output")) dir.create("output")
+if(!dir.exists("figures")) dir.create("figures")
+
+write_csv(nle_matched, "output/nle_matched.csv")
+write_csv(bre_matched, "output/bre_matched.csv")
+cat("✓ Results saved\n")
+
+cat("\n========================================\n")
+cat("Final Analysis Recommendations\n")
+cat("========================================\n")
+
+cat("\n1. NLE Analysis (", sum(nle_matched$treatment==1), "treatment units):\n")
+if(exists("nle_trends") && !is.na(nle_trends$ptal_diff)) {
+  if(abs(nle_trends$ptal_diff) > 0.5) {
+    cat("   ⚠ Parallel trends marginally violated\n")
+    cat("   Suggested DID specification with trend control:\n")
+    cat("   lm(outcome ~ treatment*post + treatment:time + controls, data=nle)\n")
+  } else { cat("   ✓ Standard DID appropriate\n")
+    cat("   lm(outcome ~ treatment*post + controls, data=nle)\n")}}
+
+cat("\n2. BRE Analysis (", sum(bre_matched$treatment==1), "treatment unit(s)):\n")
+if(n_bre_treated == 1) {
+  cat("   ✗ Single unit - DID not recommended\n")
+  cat("   Use Synthetic Control Method instead:\n")
+  cat("\n   # Install if needed: install.packages('Synth')\n")
+  cat("   library(Synth)\n")
+  cat("   # Code for synthetic control analysis...\n")
+} else if(n_bre_treated <= 3) {
+  cat("   ⚠ Small sample - interpret with extreme caution\n")
+  cat("   Report confidence intervals, not p-values\n")}
+
+```
+
+# Balance check
+
+```{r}
+
+balance_check <- function(matched_data, project) {
+
+  required_vars <- c("treatment", "ptal_baseline", "imd_baseline", "pop_baseline")
+  missing_vars <- setdiff(required_vars, names(matched_data))
+  
+  if(length(missing_vars) > 0) {
+    cat("Warning: Missing variables:", paste(missing_vars, collapse=", "), "\n")
+    return(NULL)}
+
+  balance <- matched_data %>%
+    group_by(treatment) %>%
+    summarise(
+      n = n(),
+      ptal = mean(ptal_baseline, na.rm = TRUE),
+      imd = mean(imd_baseline, na.rm = TRUE),
+      pop = mean(pop_baseline, na.rm = TRUE) / 1000,
+      
+      ptal_trend = ifelse("ptal_trend_long" %in% names(matched_data),
+                          mean(ptal_trend_long, na.rm = TRUE), NA),
+      imd_trend = ifelse("imd_trend_long" %in% names(matched_data),
+                         mean(imd_trend_long, na.rm = TRUE), NA),
+      pop_trend = ifelse("pop_trend_long" %in% names(matched_data),
+                        mean(pop_trend_long, na.rm = TRUE), NA),
+
+      dist_mean = ifelse("dist" %in% names(matched_data),
+                        mean(dist, na.rm = TRUE), NA),
+      .groups = "drop")
+  
+  cat("\n", project, "Matching Balance:\n")
+  cat("----------------------------------------\n")
+  print(balance, n = Inf)
+
+  if(nrow(balance) == 2) {
+    
+    smd_ptal <- abs(diff(balance$ptal)) / sd(matched_data$ptal_baseline, na.rm = TRUE)
+  
+    smd_imd <- abs(diff(balance$imd)) / sd(matched_data$imd_baseline, na.rm = TRUE)
+
+    smd_pop <- abs(diff(balance$pop * 1000)) / sd(matched_data$pop_baseline, na.rm = TRUE)
+    
+    cat("\nStandardized Mean Differences (SMD):\n")
+    cat("  PTAL:", round(smd_ptal, 3))
+    if(smd_ptal > 0.25) cat(" ⚠️")
+    cat("\n")
+    
+    cat("  IMD:", round(smd_imd, 3))
+    if(smd_imd > 0.25) cat(" ⚠️")
+    cat("\n")
+    
+    cat("  Population:", round(smd_pop, 3))
+    if(smd_pop > 0.25) cat(" ⚠️")
+
+    if(!is.na(balance$ptal_trend[1]) && "ptal_trend_long" %in% names(matched_data)) {
+      smd_ptal_trend <- abs(diff(balance$ptal_trend)) / 
+                       sd(matched_data$ptal_trend_long, na.rm = TRUE)
+      cat("  PTAL trend:", round(smd_ptal_trend, 3))
+      if(smd_ptal_trend > 0.25) cat(" ⚠️")
+      cat("\n")}
+    
+    if(!is.na(balance$imd_trend[1]) && "imd_trend_long" %in% names(matched_data)) {
+      smd_imd_trend <- abs(diff(balance$imd_trend)) / 
+                      sd(matched_data$imd_trend_long, na.rm = TRUE)
+      cat("  IMD trend:", round(smd_imd_trend, 3))
+      if(smd_imd_trend > 0.25) cat(" ⚠️")
+      cat("\n")}
+    
+    cat("\nBalance Assessment:\n")
+    if(smd_ptal < 0.1 && smd_imd < 0.1 && smd_pop < 0.1) {
+      cat("✓ Excellent balance (all SMD < 0.1)\n")
+    } else if(smd_ptal < 0.25 && smd_imd < 0.25 && smd_pop < 0.25) {
+      cat("○ Acceptable balance (all SMD < 0.25)\n")
+    } else {cat("✗ Poor balance (some SMD > 0.25)\n")}
+    
+    return(invisible(list(
+      smd_ptal = smd_ptal,
+      smd_imd = smd_imd,
+      smd_pop = smd_pop,
+      balance_table = balance)))
+    
+  } else {cat("\nWarning: Cannot calculate SMD - need exactly 2 groups\n")
+    return(NULL)}}
+
+nle_balance <- balance_check(nle_matched, "NLE")
+bre_balance <- balance_check(bre_matched, "BRE")
+
+```
+# Using new matching function and metrics
+
+```{r}
+prepare_did_data_v2 <- function() {
+  all_lsoa <- all_lsoa
+  nle_lsoas <- nle_affected_new$LSOA11CD  # 35 LSOAs
+  bre_lsoas <- bre_affected_new$LSOA11CD  # 4 LSOAs
+  NLE_INTERVENTION_YEAR <- 2015
+  BRE_INTERVENTION_YEAR <- 2016
+
+  cat("Treatment Groups:\n")
+  cat("- NLE (intervention: 2015):", length(nle_lsoas), "LSOAs\n")
+  cat("- BRE (intervention: 2016):", length(bre_lsoas), "LSOAs\n\n")
+
+  if (!"dist_to_nle_station" %in% names(all_lsoa)) {
+    library(sf)
+
+    lsoa_sf <- all_lsoa %>%
+      st_transform(27700)
+    nle_sf <- nine_elms_station %>%
+      st_transform(27700)
+    bre_sf <- bre_station %>%
+      st_transform(27700)
+
+    dist_matrix_nle <- st_distance(lsoa_sf, nle_sf)
+    all_lsoa$dist_to_nle_station <- as.numeric(apply(dist_matrix_nle, 1, min))
+
+    dist_matrix_bre <- st_distance(lsoa_sf, bre_sf)
+    all_lsoa$dist_to_bre_station <- as.numeric(apply(dist_matrix_bre, 1, min))}
+
+  cat("Data Validation:\n")
+  cat("- Total LSOAs:", nrow(all_lsoa), "\n")
+  cat("- House price 2014 available:", sum(!is.na(all_lsoa$median_price_2014)), "\n")
+  cat("- House price 2015 available:", sum(!is.na(all_lsoa$median_price_2015)), "\n")
+
+  return(list(
+    all_lsoa = all_lsoa,
+    nle_lsoas = nle_lsoas,
+    bre_lsoas = bre_lsoas,
+    nle_year = NLE_INTERVENTION_YEAR,
+    bre_year = BRE_INTERVENTION_YEAR))}
+
+select_controls_complete <- function(all_lsoa, treatment_lsoas,
+                                    project_type, dist_to_station) {
+
+  if(project_type == "NLE") {
+    
+    INTERVENTION_YEAR <- 2015
+    BASELINE_YEAR <- 2014
+    
+    baseline_data <- all_lsoa %>%
+      mutate(treatment = ifelse(LSOA11CD %in% treatment_lsoas, 1, 0),
+        dist = dist_to_station,
+        intervention_year = INTERVENTION_YEAR,
+
+        ptal_baseline = PTAL_Value_2014,
+        imd_baseline = imd2010,
+        pop_baseline = population_2014,
+        price_baseline = median_price_2014,
+        
+        ptal_trend_short = (PTAL_Value_2014 - PTAL_Value_2012)/2,
+        pop_trend_short = (population_2014 - population_2012)/2,
+  
+        ptal_trend_long = (PTAL_Value_2014 - PTAL_Value_2007)/7,
+        imd_trend_long = (imd2010 - imd2004)/6,
+        pop_trend_long = (population_2014 - population_2011)/3)
+    
+  } else if(project_type == "BRE") {
+    INTERVENTION_YEAR <- 2016
+    BASELINE_YEAR <- 2015
+    
+    cat("📅 Barking Riverside Extension\n")
+    cat("   Intervention: 2016, Baseline: 2015\n\n")
+    
+    baseline_data <- all_lsoa %>%
+      mutate(treatment = ifelse(LSOA11CD %in% treatment_lsoas, 1, 0),
+        dist = dist_to_station,
+        intervention_year = INTERVENTION_YEAR,
+   
+        ptal_baseline = PTAL_Value_2015,
+        imd_baseline = imd2015,
+        pop_baseline = population_2015,
+        price_baseline = median_price_2015,
+   
+        ptal_trend_short = (PTAL_Value_2015 - PTAL_Value_2014)/1,
+        imd_trend_short = (imd2015 - imd2010)/5,
+        pop_trend_short = (population_2015 - population_2014)/1,
+  
+        ptal_trend_long = (PTAL_Value_2015 - PTAL_Value_2007)/8,
+        imd_trend_long = (imd2015 - imd2004)/11,
+        pop_trend_long = (population_2015 - population_2011)/4)}
+  
+  n_treated <- sum(baseline_data$treatment == 1)
+  
+  treat_summary <- baseline_data %>%
+    filter(treatment == 1) %>%
+    summarise(n = n(),
+      mean_ptal = mean(ptal_baseline, na.rm = TRUE),
+      mean_imd = mean(imd_baseline, na.rm = TRUE),
+      mean_pop = mean(pop_baseline, na.rm = TRUE),
+      mean_price = mean(price_baseline, na.rm = TRUE),
+
+      mean_ptal_trend = mean(ptal_trend_long, na.rm = TRUE),
+      mean_imd_trend = mean(imd_trend_long, na.rm = TRUE),
+      mean_pop_trend = mean(pop_trend_long, na.rm = TRUE))
+  
+  cat("📊 Treatment Group (n=", treat_summary$n, "):\n", sep="")
+  cat("\n   Baseline Values:\n")
+  cat("   - PTAL:", round(treat_summary$mean_ptal, 2), "\n")
+  cat("   - IMD:", round(treat_summary$mean_imd, 2), "\n")
+  cat("   - Population:", format(round(treat_summary$mean_pop, 0), big.mark=","), "\n")
+  cat("   - House Price: £", format(round(treat_summary$mean_price, 0), big.mark=","), "\n")
+  
+  cat("\n   Pre-treatment Trends:\n")
+  cat("   - PTAL trend:", round(treat_summary$mean_ptal_trend, 3), "/year\n")
+  cat("   - IMD trend:", round(treat_summary$mean_imd_trend, 3), "/year\n")
+  cat("   - Pop trend:", round(treat_summary$mean_pop_trend, 0), "/year\n\n")
+
+  potential_controls <- baseline_data %>%
+    filter(treatment == 0,
+      dist >= 1500 & dist <= 8000,
+      !is.na(ptal_baseline),
+      !is.na(imd_baseline),
+      !is.na(pop_baseline),
+      !is.na(ptal_trend_long),  
+      !is.na(imd_trend_long))
+  
+  cat("🔍 Potential controls found:", nrow(potential_controls), "\n")
+  
+  cat("\n📈 Checking data variation:\n")
+  for(var in c("ptal_baseline", "imd_baseline", "ptal_trend_long")) {
+    var_sd <- sd(potential_controls[[var]], na.rm = TRUE)
+    cat("   SD of", var, ":", round(var_sd, 3), "\n")}
+  
+  if(n_treated <= 4) {
+    match_ratio <- 5
+    caliper_val <- 0.5 
+  } else if(n_treated <= 10) {
+    match_ratio <- 3
+    caliper_val <- 0.3
+  } else {
+    match_ratio <- 2
+    caliper_val <- 0.25
+  }
+  
+  cat("\n⚙️ Matching Configuration:\n")
+  cat("   Target ratio: 1:", match_ratio, "\n")
+  cat("   Caliper:", caliper_val, "SD\n\n")
+  
+  matched_data <- NULL
+  matching_method <- NULL
+  
+  tryCatch({
+    psm_full <- matchit(
+      treatment ~ ptal_baseline + imd_baseline + log(pop_baseline + 1) +
+                  ptal_trend_long + imd_trend_long + pop_trend_long,
+      data = bind_rows(
+        baseline_data %>% filter(treatment == 1),
+        potential_controls),
+      method = "nearest",
+      distance = "logit",
+      ratio = match_ratio,
+      caliper = caliper_val,
+      replace = FALSE)
+    
+    matched_data <- match.data(psm_full)
+    matching_method <- "Full PSM with trends"
+    cat("✓ Success!\n")
+    }, error = function(e) {
+    cat("✗ Failed:", substr(e$message, 1, 50), "...\n")})
+
+  if(is.null(matched_data)) {
+    cat("\nTry 2: Simplified PSM (baseline + key trends)...\n")
+    
+    tryCatch({
+      psm_simple <- matchit(
+        treatment ~ ptal_baseline + imd_baseline + ptal_trend_long,
+        data = bind_rows(
+          baseline_data %>% filter(treatment == 1),
+          potential_controls),
+        method = "nearest",
+        distance = "logit",
+        ratio = match_ratio,
+        caliper = caliper_val * 1.5, 
+        replace = TRUE)
+      
+      matched_data <- match.data(psm_simple)
+      matching_method <- "Simplified PSM"
+      cat("✓ Success!\n")
+      
+    }, error = function(e) {cat("✗ Failed:", substr(e$message, 1, 50), "...\n")})}
+  
+  if(is.null(matched_data)) {
+    cat("\nTry 3: Mahalanobis distance with trends...\n")
+    
+    tryCatch({match_vars <- c("ptal_baseline", "imd_baseline", "pop_baseline",
+                     "ptal_trend_long", "imd_trend_long")
+      
+      data_for_match <- bind_rows(
+        baseline_data %>% filter(treatment == 1),
+        potential_controls) %>%
+        select(all_of(c("treatment", match_vars, "LSOA11CD"))) %>%
+        na.omit()
+      
+      maha_match <- matchit(
+        treatment ~ ptal_baseline + imd_baseline + pop_baseline +
+                    ptal_trend_long + imd_trend_long,
+        data = data_for_match,
+        method = "nearest",
+        distance = "mahalanobis",
+        ratio = match_ratio,
+        replace = FALSE)
+      
+      matched_data <- match.data(maha_match)
+      
+      matched_data <- matched_data %>%
+        left_join(baseline_data %>% 
+                   select(-treatment), 
+                 by = "LSOA11CD")
+      
+      matching_method <- "Mahalanobis with trends"
+      cat("✓ Success!\n")
+      
+    }, error = function(e) {
+      cat("✗ Failed:", substr(e$message, 1, 50), "...\n")})}
+
+  if(is.null(matched_data)) {
+    cat("\nTry 4: Direct selection based on trend similarity...\n")
+
+    potential_controls <- potential_controls %>%
+      mutate(ptal_diff = abs(ptal_baseline - treat_summary$mean_ptal) / 
+                   sd(baseline_data$ptal_baseline, na.rm = TRUE),
+        imd_diff = abs(imd_baseline - treat_summary$mean_imd) / 
+                  sd(baseline_data$imd_baseline, na.rm = TRUE),
+        
+        ptal_trend_diff = abs(ptal_trend_long - treat_summary$mean_ptal_trend) / 
+                         sd(baseline_data$ptal_trend_long, na.rm = TRUE),
+        imd_trend_diff = abs(imd_trend_long - treat_summary$mean_imd_trend) / 
+                        sd(baseline_data$imd_trend_long, na.rm = TRUE),
+        
+        total_distance = 0.2 * ptal_diff + 
+                        0.2 * imd_diff + 
+                        0.3 * ptal_trend_diff + 
+                        0.3 * imd_trend_diff) %>% 
+      arrange(total_distance)
+    
+    n_controls <- min(n_treated * match_ratio, nrow(potential_controls))
+    
+    selected_controls <- potential_controls %>%
+      slice_head(n = n_controls)
+    
+    matched_data <- bind_rows(
+      baseline_data %>% filter(treatment == 1),
+      selected_controls)
+    
+    matching_method <- "Direct trend-based selection"
+    cat("✓ Selected", n_controls, "most similar controls\n")}
+  
+
+  
+  if(!is.null(matched_data)) {
+    cat("\n========================================\n")
+    cat("MATCHING RESULTS -", matching_method, "\n")
+    cat("========================================\n\n")
+    
+    cat("📊 Sample Size:\n")
+    cat("   Treatment:", sum(matched_data$treatment == 1), "\n")
+    cat("   Control:", sum(matched_data$treatment == 0), "\n")
+    cat("   Ratio: 1:", 
+        round(sum(matched_data$treatment == 0)/sum(matched_data$treatment == 1), 1), "\n\n")
+    
+    vars_to_check <- list(
+      "Baseline" = c("ptal_baseline", "imd_baseline", "pop_baseline"),
+      "Trends" = c("ptal_trend_long", "imd_trend_long", "pop_trend_long"))
+    
+    cat("📈 Balance Assessment (SMD):\n")
+    
+    all_smds <- c()
+    
+    for(category in names(vars_to_check)) {
+      cat("\n   ", category, ":\n", sep="")
+      
+      for(var in vars_to_check[[category]]) {
+        if(var %in% names(matched_data) && 
+           sum(!is.na(matched_data[[var]])) > 0) {
+          
+          treat_mean <- mean(matched_data[[var]][matched_data$treatment==1], na.rm=TRUE)
+          control_mean <- mean(matched_data[[var]][matched_data$treatment==0], na.rm=TRUE)
+          pooled_sd <- sd(matched_data[[var]], na.rm=TRUE)
+          
+          if(pooled_sd > 0) {
+            smd <- abs(treat_mean - control_mean) / pooled_sd
+          } else {smd <- 0}
+          
+          all_smds <- c(all_smds, smd)
+     
+          var_name <- gsub("_baseline|_trend_long", "", var)
+          status <- ifelse(smd < 0.1, "✅", 
+                          ifelse(smd < 0.25, "⚠️", "❌"))
+          
+          cat(sprintf("   - %-10s: %.3f %s\n", var_name, smd, status))}}}
+    
+    mean_smd <- mean(all_smds, na.rm = TRUE)
+    cat("\n📊 Overall Balance:\n")
+    cat("   Mean SMD:", sprintf("%.3f", mean_smd), "\n")
+    
+    if(mean_smd < 0.15) {
+      cat("   Grade: Good ✅\n")
+      cat("   ➜ Proceed with DID analysis\n")
+    } else if(mean_smd < 0.25) {
+      cat("   Grade: Acceptable ⚠️\n")
+      cat("   ➜ Use with covariate adjustment\n")
+    } else {cat("   Grade: Poor ❌\n")
+      cat("   ➜ Consider alternative methods\n")}
+    
+    cat("\n🔍 Pre-treatment Parallel Trends Check:\n")
+    
+    trend_check <- matched_data %>%
+      group_by(treatment) %>%
+      summarise(
+        ptal_trend = mean(ptal_trend_long, na.rm = TRUE),
+        imd_trend = mean(imd_trend_long, na.rm = TRUE),
+        .groups = "drop")
+    
+    ptal_trend_diff <- abs(diff(trend_check$ptal_trend))
+    imd_trend_diff <- abs(diff(trend_check$imd_trend))
+    
+    cat("   PTAL trend difference:", round(ptal_trend_diff, 4), 
+        ifelse(ptal_trend_diff < 0.5, "✅", "⚠️"), "\n")
+    cat("   IMD trend difference:", round(imd_trend_diff, 4),
+        ifelse(imd_trend_diff < 2, "✅", "⚠️"), "\n")
+    
+    if(ptal_trend_diff < 0.5 && imd_trend_diff < 2) {
+      cat("   ➜ Good evidence for parallel trends\n")
+    } else {cat("   ➜ Trends may differ - verify with full test\n")
+    }} else {cat("\n❌ All matching strategies failed!\n")
+    cat("Recommendations:\n")
+    cat("1. Check data quality and missing values\n")
+    cat("2. Consider synthetic control method\n")
+    cat("3. Expand search radius or relax criteria\n")}
+  return(matched_data)}
+
+
+data_v2 <- prepare_did_data_v2()
+
+nle_matched_final <- select_controls_complete(
+  all_lsoa = data_v2$all_lsoa,
+  treatment_lsoas = data_v2$nle_lsoas,
+  project_type = "NLE",
+  dist_to_station = data_v2$all_lsoa$dist_to_nle_station)
+
+bre_matched_final <- select_controls_complete(
+  all_lsoa = data_v2$all_lsoa,
+  treatment_lsoas = data_v2$bre_lsoas,
+  project_type = "BRE",
+  dist_to_station = data_v2$all_lsoa$dist_to_bre_station)
+
+if(!dir.exists("output_final")) dir.create("output_final")
+
+if(!is.null(nle_matched_final)) {
+  write_csv(nle_matched_final, "output_final/nle_matched_with_trends.csv")
+  cat("\n✅ NLE matching saved\n")
+}
+
+if(!is.null(bre_matched_final)) {
+  write_csv(bre_matched_final, "output_final/bre_matched_with_trends.csv")
+  cat("\n✅ BRE matching saved\n")}
+
+```
+
+# Final version of selecting
+
+```{r}
+select_controls_robust_simple <- function(all_lsoa, treatment_lsoas,
+                                         project_type, dist_to_station) {
+  
+  if(project_type == "NLE") {
+    INTERVENTION_YEAR <- 2015
+    baseline_data <- all_lsoa %>%
+      mutate(treatment = ifelse(LSOA11CD %in% treatment_lsoas, 1, 0),
+        dist = dist_to_station,
+        ptal_baseline = PTAL_Value_2014,
+        imd_baseline = imd2010
+      )} else {INTERVENTION_YEAR <- 2016
+    baseline_data <- all_lsoa %>%
+      mutate(treatment = ifelse(LSOA11CD %in% treatment_lsoas, 1, 0),
+        dist = dist_to_station,
+        ptal_baseline = PTAL_Value_2015,
+        imd_baseline = imd2015)}
+  
+  n_treated <- sum(baseline_data$treatment == 1)
+  cat("Treatment units:", n_treated, "\n")
+  
+  treat_stats <- baseline_data %>%
+    filter(treatment == 1) %>%
+    summarise(mean_ptal = mean(ptal_baseline, na.rm = TRUE),
+      mean_imd = mean(imd_baseline, na.rm = TRUE))
+  
+  cat("\nTreatment characteristics:\n")
+  cat("  PTAL:", round(treat_stats$mean_ptal, 2), "\n")
+  cat("  IMD:", round(treat_stats$mean_imd, 2), "\n\n")
+  
+  potential_controls <- baseline_data %>%
+    filter(treatment == 0,
+      dist >= 1500 & dist <= 8000,
+      !is.na(ptal_baseline),
+      !is.na(imd_baseline))
+  
+  cat("Potential controls (>2km):", nrow(potential_controls), "\n\n")
+  
+  if(n_treated <= 4) {
+    match_ratio <- 5
+  } else if(n_treated <= 10) {
+    match_ratio <- 3
+  } else {match_ratio <- 2}
+  
+  cat("Target matching ratio: 1:", match_ratio, "\n\n")
+  
+  matched_data <- NULL
+  matching_method <- NULL
+  
+  tryCatch({psm_simple <- matchit(
+      treatment ~ ptal_baseline + imd_baseline,
+      data = bind_rows(
+        baseline_data %>% filter(treatment == 1),
+        potential_controls),
+      method = "nearest",
+      distance = "logit",
+      ratio = match_ratio,
+      caliper = 0.3,
+      replace = FALSE)
+    
+    matched_data <- match.data(psm_simple)
+    matching_method <- "PSM (IMD + PTAL)"
+    cat("✓ Success with simplified PSM\n")
+    
+  }, error = function(e) {
+    cat("✗ Simplified PSM failed:", substr(e$message, 1, 50), "...\n")})
+  
+  if(is.null(matched_data)) {
+    cat("\nStrategy 2: PSM with relaxed caliper...\n")
+    
+    tryCatch({psm_relaxed <- matchit(
+        treatment ~ ptal_baseline + imd_baseline,
+        data = bind_rows(
+          baseline_data %>% filter(treatment == 1),
+          potential_controls),
+        method = "nearest",
+        distance = "logit",
+        ratio = match_ratio,
+        caliper = 0.5,
+        replace = TRUE)
+      
+      matched_data <- match.data(psm_relaxed)
+      matching_method <- "PSM (relaxed caliper)"
+      cat("✓ Success with relaxed PSM\n")
+      
+    }, error = function(e) {
+      cat("✗ Relaxed PSM failed:", substr(e$message, 1, 50), "...\n")})}
+  
+  if(is.null(matched_data)) {
+    cat("\nStrategy 3: Mahalanobis distance matching...\n")
+    
+    tryCatch({
+      maha_match <- matchit(
+        treatment ~ ptal_baseline + imd_baseline,
+        data = bind_rows(baseline_data %>% filter(treatment == 1),
+          potential_controls),
+        method = "nearest",
+        distance = "mahalanobis",
+        ratio = match_ratio,
+        replace = FALSE)
+      
+      matched_data <- match.data(maha_match)
+      matching_method <- "Mahalanobis distance"
+      cat("✓ Success with Mahalanobis matching\n")
+      
+    }, error = function(e) {
+      cat("✗ Mahalanobis matching failed:", substr(e$message, 1, 50), "...\n")})}
+  
+  if(is.null(matched_data)) {
+    cat("\nStrategy 4: Coarsened exact matching...\n")
+    
+    all_ptal <- c(baseline_data$ptal_baseline[baseline_data$treatment == 1],
+                  potential_controls$ptal_baseline)
+    all_imd <- c(baseline_data$imd_baseline[baseline_data$treatment == 1],
+                 potential_controls$imd_baseline)
+    
+    potential_controls <- potential_controls %>%
+      mutate(ptal_cat = cut(ptal_baseline,
+                       breaks = quantile(all_ptal, probs = c(0, 0.5, 1), na.rm = TRUE),
+                       labels = c("Low", "High"),
+                       include.lowest = TRUE),
+        imd_cat = cut(imd_baseline,
+                      breaks = quantile(all_imd, probs = c(0, 0.5, 1), na.rm = TRUE),
+                      labels = c("Low", "High"),
+                      include.lowest = TRUE))
+    
+    baseline_data <- baseline_data %>%
+      mutate(ptal_cat = cut(ptal_baseline,
+                       breaks = quantile(all_ptal, probs = c(0, 0.5, 1), na.rm = TRUE),
+                       labels = c("Low", "High"),
+                       include.lowest = TRUE),
+        imd_cat = cut(imd_baseline,
+                      breaks = quantile(all_imd, probs = c(0, 0.5, 1), na.rm = TRUE),
+                      labels = c("Low", "High"),
+                      include.lowest = TRUE))
+    
+    tryCatch({exact_match <- matchit(
+        treatment ~ ptal_baseline + imd_baseline,
+        data = bind_rows(
+          baseline_data %>% filter(treatment == 1),
+          potential_controls),
+        method = "nearest",
+        exact = ~ ptal_cat + imd_cat,
+        ratio = match_ratio,
+        replace = TRUE)
+      
+      matched_data <- match.data(exact_match)
+      matching_method <- "Coarsened exact matching"
+      cat("✓ Success with exact matching\n")
+      
+    }, error = function(e) {
+      cat("✗ Exact matching failed:", substr(e$message, 1, 50), "...\n")})}
+  
+  if(is.null(matched_data)) {
+    cat("\nStrategy 5: Direct similarity selection...\n")
+    
+    ptal_sd <- sd(c(baseline_data$ptal_baseline, potential_controls$ptal_baseline), na.rm = TRUE)
+    imd_sd <- sd(c(baseline_data$imd_baseline, potential_controls$imd_baseline), na.rm = TRUE)
+    
+    potential_controls <- potential_controls %>%
+      mutate(ptal_diff = abs(ptal_baseline - treat_stats$mean_ptal) / ptal_sd,
+        imd_diff = abs(imd_baseline - treat_stats$mean_imd) / imd_sd,
+        total_distance = sqrt(ptal_diff^2 + imd_diff^2)) %>%
+      arrange(total_distance)
+    
+    n_controls <- min(n_treated * match_ratio, nrow(potential_controls))
+    
+    selected_controls <- potential_controls %>%
+      slice_head(n = n_controls)
+    
+    matched_data <- bind_rows(
+      baseline_data %>% filter(treatment == 1),
+      selected_controls %>% mutate(treatment = 0))
+    
+    matching_method <- "Direct distance selection"
+    cat("✓ Used direct selection (", n_controls, " controls)\n", sep="")}
+  
+  if(!is.null(matched_data)) {
+    
+    cat("📊 Final Sample Composition:\n")
+    cat("   Treatment:", sum(matched_data$treatment == 1), "\n")
+    cat("   Control:", sum(matched_data$treatment == 0), "\n")
+    cat("   Ratio: 1:",
+        round(sum(matched_data$treatment == 0)/sum(matched_data$treatment == 1), 1), "\n\n")
+    
+    vars_check <- c("ptal_baseline", "imd_baseline")
+    var_names <- c("PTAL", "IMD")
+    
+    cat("📈 Balance Assessment (SMD):\n")
+    all_smds <- c()
+    
+    for(i in seq_along(vars_check)) {
+      var <- vars_check[i]
+      name <- var_names[i]
+      
+      if(var %in% names(matched_data)) {
+        treat_mean <- mean(matched_data[[var]][matched_data$treatment==1], na.rm=TRUE)
+        control_mean <- mean(matched_data[[var]][matched_data$treatment==0], na.rm=TRUE)
+        pooled_sd <- sd(matched_data[[var]], na.rm=TRUE)
+        
+        if(pooled_sd > 0) {
+          smd <- abs(treat_mean - control_mean) / pooled_sd
+        } else {smd <- 0}
+        
+        all_smds <- c(all_smds, smd)
+        
+        if(smd < 0.1) {
+          status <- "✅ Excellent"
+        } else if(smd < 0.25) {
+          status <- "⚠️ Good"
+        } else {status <- "❌ Poor"}
+        
+        cat(sprintf("   %-10s: %.3f %s\n", name, smd, status))
+        cat(sprintf("   %-10s  Treat: %.2f | Control: %.2f\n", "", treat_mean, control_mean))}}
+    
+    mean_smd <- mean(all_smds, na.rm = TRUE)
+    cat("\n📊 Overall Balance:\n")
+    cat("   Mean SMD:", sprintf("%.3f", mean_smd), "\n")
+    
+    if(mean_smd < 0.15) {
+      cat("   Grade: Good ✅\n")
+      cat("   ➜ Proceed with DID analysis\n")
+    } else if(mean_smd < 0.25) {
+      cat("   Grade: Acceptable ⚠️\n")
+      cat("   ➜ Use with caution\n")
+    } else {cat("   Grade: Poor ❌\n")
+      cat("   ➜ Consider alternative methods\n")}
+    
+  } else {cat("\n❌ All matching strategies failed!\n")}
+  
+  return(matched_data)}
+
+prepare_did_data_simple <- function() {
+  
+  all_lsoa <- all_lsoa
+  
+  nle_lsoas <- nle_affected_new$LSOA11CD
+  bre_lsoas <- bre_affected_new$LSOA11CD
+  
+  NLE_INTERVENTION_YEAR <- 2015
+  BRE_INTERVENTION_YEAR <- 2016
+  
+  cat("Treatment Groups:\n")
+  cat("- NLE (intervention: 2015):", length(nle_lsoas), "LSOAs\n")
+  cat("- BRE (intervention: 2016):", length(bre_lsoas), "LSOAs\n\n")
+  
+  if(!"dist_to_nle_station" %in% names(all_lsoa)) {
+    library(sf)
+    
+    lsoa_sf <- all_lsoa %>%
+      st_transform(27700)
+    
+    nle_sf <- nine_elms_station %>%
+      st_transform(27700)
+    
+    bre_sf <- bre_station %>%
+      st_transform(27700)
+    
+    dist_matrix_nle <- st_distance(lsoa_sf, nle_sf)
+    all_lsoa$dist_to_nle_station <- as.numeric(apply(dist_matrix_nle, 1, min))
+    
+    dist_matrix_bre <- st_distance(lsoa_sf, bre_sf)
+    all_lsoa$dist_to_bre_station <- as.numeric(apply(dist_matrix_bre, 1, min))}
+  
+  cat("Data Validation:\n")
+  cat("- Total LSOAs:", nrow(all_lsoa), "\n")
+  cat("- IMD 2010 available:", sum(!is.na(all_lsoa$imd2010)), "\n")
+  cat("- IMD 2015 available:", sum(!is.na(all_lsoa$imd2015)), "\n")
+  cat("- PTAL 2014 available:", sum(!is.na(all_lsoa$PTAL_Value_2014)), "\n")
+  cat("- PTAL 2015 available:", sum(!is.na(all_lsoa$PTAL_Value_2015)), "\n\n")
+  
+  return(list(all_lsoa = all_lsoa,
+    nle_lsoas = nle_lsoas,
+    bre_lsoas = bre_lsoas,
+    nle_year = NLE_INTERVENTION_YEAR,
+    bre_year = BRE_INTERVENTION_YEAR))}
+
+generate_balance_table_simple <- function(matched_data, project_name) {
+  if(is.null(matched_data)) {
+    cat("No matched data for", project_name, "\n")
+    return(NULL)
+  }
+  
+  vars <- c("ptal_baseline", "imd_baseline")
+  var_names <- c("PTAL", "IMD")
+  
+  balance_results <- data.frame(
+    Variable = var_names,
+    Treatment_Mean = NA,
+    Control_Mean = NA,
+    SMD = NA,
+    Assessment = NA,
+    stringsAsFactors = FALSE)
+  
+  for(i in seq_along(vars)) {
+    var <- vars[i]
+    
+    if(var %in% names(matched_data)) {
+      treat_mean <- mean(matched_data[[var]][matched_data$treatment==1], na.rm=TRUE)
+      control_mean <- mean(matched_data[[var]][matched_data$treatment==0], na.rm=TRUE)
+      pooled_sd <- sd(matched_data[[var]], na.rm=TRUE)
+      
+      if(pooled_sd > 0) {
+        smd <- abs(treat_mean - control_mean) / pooled_sd
+      } else {smd <- 0}
+      
+      balance_results$Treatment_Mean[i] <- round(treat_mean, 2)
+      balance_results$Control_Mean[i] <- round(control_mean, 2)
+      balance_results$SMD[i] <- round(smd, 3)
+      
+      if(smd < 0.1) {
+        balance_results$Assessment[i] <- "Excellent"
+      } else if(smd < 0.25) {
+        balance_results$Assessment[i] <- "Good"
+      } else {balance_results$Assessment[i] <- "Poor"}}}
+  
+  return(balance_results)}
+
+data_simple <- prepare_did_data_simple()
+
+nle_matched_simple <- select_controls_robust_simple(
+  all_lsoa = data_simple$all_lsoa,
+  treatment_lsoas = data_simple$nle_lsoas,
+  project_type = "NLE",
+  dist_to_station = data_simple$all_lsoa$dist_to_nle_station)
+
+bre_matched_simple <- select_controls_robust_simple(
+  all_lsoa = data_simple$all_lsoa,
+  treatment_lsoas = data_simple$bre_lsoas,
+  project_type = "BRE",
+  dist_to_station = data_simple$all_lsoa$dist_to_bre_station)
+
+if(!is.null(nle_matched_simple) && !is.null(bre_matched_simple)) {
+  if(!dir.exists("output_simple")) dir.create("output_simple")
+  
+  write_csv(nle_matched_simple, "output_simple/nle_matched_simple.csv")
+  write_csv(bre_matched_simple, "output_simple/bre_matched_simple.csv")
+  
+  cat("\n✅ Simplified matching completed and saved!\n")
+  cat("📁 Files saved in: output_simple/\n")} else {
+  cat("\n⚠️ Some matching failed - check the results\n")}
+
+if(!is.null(nle_matched_simple)) {
+  nle_balance <- generate_balance_table_simple(nle_matched_simple, "NLE")
+  cat("\n NLE Balance Table:\n")
+  print(nle_balance)}
+
+if(!is.null(bre_matched_simple)) {
+  bre_balance <- generate_balance_table_simple(bre_matched_simple, "BRE")
+  cat("\n BRE Balance Table:\n")
+  print(bre_balance)}
+
+cat("- Ready for parallel trends test and DID analysis\n")
+```
+

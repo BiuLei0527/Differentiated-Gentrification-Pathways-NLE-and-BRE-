@@ -1,0 +1,661 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-08-15"
+---
+# Descriptive statistics
+
+```{r}
+library(dplyr)
+
+quick_summary <- function(data, dataset_name) {if(!exists(deparse(substitute(data)))) {
+    return(NULL)}
+  
+  basic_info <- list(dataset = dataset_name,
+    rows = nrow(data),
+    cols = ncol(data),
+    year_range = paste(min(data$year, na.rm = TRUE), "-", max(data$year, na.rm = TRUE)),
+    lsoa_count = length(unique(data$LSOA11CD)))
+  
+  # Variable statistics
+  numeric_vars <- c("lsoa_income_estimate", "median_price", "crime rate", "mobility")
+  
+  stats_list <- list()
+  for(var in numeric_vars) {if(var %in% names(data)) {
+      stats <- data %>%
+        summarise(Mean = round(mean(!!sym(var), na.rm = TRUE), 2),
+          Median = round(median(!!sym(var), na.rm = TRUE), 2),
+          SD = round(sd(!!sym(var), na.rm = TRUE), 2),
+          Min = round(min(!!sym(var), na.rm = TRUE), 2),
+          Max = round(max(!!sym(var), na.rm = TRUE), 2),
+          NA_count = sum(is.na(!!sym(var))))
+      stats_list[[var]] <- stats}}
+  
+  return(list(basic_info = basic_info, statistics = stats_list))}
+
+datasets <- list(
+  "nle_matched_metrics" = if(exists("nle_matched_metrics")) nle_matched_metrics else NULL,
+  "nle_affected_metrics" = if(exists("nle_affected_metrics")) nle_affected_metrics else NULL,
+  "bre_matched_metrics" = if(exists("bre_matched_metrics")) bre_matched_metrics else NULL,
+  "bre_affected_metrics" = if(exists("bre_affected_metrics")) bre_affected_metrics else NULL)
+
+# Create comparison table
+comparison_table <- data.frame(
+  Dataset = character(),
+  Variable = character(),
+  Mean = numeric(),
+  Median = numeric(),
+  SD = numeric(),
+  Min = numeric(),
+  Max = numeric(),
+  stringsAsFactors = FALSE)
+
+numeric_vars <- c("lsoa_income_estimate", "median_price", "crime rate", "mobility")
+
+for(dataset_name in names(datasets)) {
+  dataset <- datasets[[dataset_name]]
+  
+  if(!is.null(dataset)) {for(var in numeric_vars) {
+      if(var %in% names(dataset)) {stats <- dataset %>%
+          summarise(Mean = round(mean(!!sym(var), na.rm = TRUE), 2),
+            Median = round(median(!!sym(var), na.rm = TRUE), 2),
+            SD = round(sd(!!sym(var), na.rm = TRUE), 2),
+            Min = round(min(!!sym(var), na.rm = TRUE), 2),
+            Max = round(max(!!sym(var), na.rm = TRUE), 2))
+        
+        comparison_table <- rbind(comparison_table, data.frame(
+          Dataset = dataset_name,
+          Variable = var,
+          Mean = stats$Mean,
+          Median = stats$Median,
+          SD = stats$SD,
+          Min = stats$Min,
+          Max = stats$Max))}}}}
+
+if(nrow(comparison_table) > 0) {
+  print(comparison_table)
+  write.csv(comparison_table, "datasets_comparison.csv", row.names = FALSE)}
+
+quality_check <- data.frame(
+  Dataset = character(),
+  Rows = numeric(),
+  Years = character(),
+  LSOAs = numeric(),
+  Income_NA = numeric(),
+  Price_NA = numeric(),
+  Crime_NA = numeric(),
+  Mobility_NA = numeric(),
+  stringsAsFactors = FALSE)
+
+for(dataset_name in names(datasets)) {
+  dataset <- datasets[[dataset_name]]
+  
+  if(!is.null(dataset)) {missing_summary <- dataset %>%
+      summarise(income_na = sum(is.na(lsoa_income_estimate)),
+        price_na = sum(is.na(median_price)),
+        crime_na = sum(is.na(`crime rate`)),
+        mobility_na = sum(is.na(mobility)))
+    
+    quality_check <- rbind(quality_check, data.frame(
+      Dataset = dataset_name,
+      Rows = nrow(dataset),
+      Years = paste(sort(unique(dataset$year)), collapse = ", "),
+      LSOAs = length(unique(dataset$LSOA11CD)),
+      Income_NA = missing_summary$income_na,
+      Price_NA = missing_summary$price_na,
+      Crime_NA = missing_summary$crime_na,
+      Mobility_NA = missing_summary$mobility_na))}}
+
+print(quality_check)
+```
+
+# Quantifying gentrification index
+
+```{r} 
+library(tidyverse)
+library(sf)
+library(ggspatial)
+library(RColorBrewer)
+
+# Create output directory
+if(!dir.exists("gentrification_result")) {
+  dir.create("gentrification_result")}
+
+calculate_dynamic_gentrification_index <- function(panel_data, treatment_year, project_name) {
+  
+  panel_data_no_geo <- panel_data %>% st_drop_geometry()
+  baseline_year <- treatment_year - 1
+
+  baseline_lsoas <- panel_data_no_geo %>% filter(year == baseline_year) %>% pull(LSOA11CD)
+  latest_lsoas <- panel_data_no_geo %>% filter(year == max(year)) %>% pull(LSOA11CD)
+  common_lsoas <- intersect(baseline_lsoas, latest_lsoas)
+
+  crime_check <- panel_data_no_geo %>%
+    filter(year %in% c(baseline_year, max(year))) %>%
+    group_by(year) %>%
+    summarise(crime_min = min(`crime rate`, na.rm = TRUE),
+      crime_max = max(`crime rate`, na.rm = TRUE),
+      crime_mean = round(mean(`crime rate`, na.rm = TRUE), 4),
+      crime_zero_count = sum(`crime rate` == 0, na.rm = TRUE),
+      total_count = n(),
+      .groups = 'drop')
+  
+  # Calculate change data
+  latest_year <- max(panel_data_no_geo$year)
+  
+  # Get baseline and latest year data
+  baseline_data <- panel_data_no_geo %>%
+    filter(year == baseline_year) %>%
+    select(LSOA11CD,
+           baseline_income = lsoa_income_estimate,
+           baseline_price = median_price,
+           baseline_mobility = mobility,
+           baseline_crime = `crime rate`)
+  
+  latest_data <- panel_data_no_geo %>%
+    filter(year == latest_year) %>%
+    select(LSOA11CD,
+           latest_income = lsoa_income_estimate,
+           latest_price = median_price,
+           latest_mobility = mobility,
+           latest_crime = `crime rate`)
+
+  change_data <- baseline_data %>%
+    inner_join(latest_data, by = "LSOA11CD") %>%
+    mutate(income_change_rate = ifelse(baseline_income > 0,
+                                 (latest_income - baseline_income) / baseline_income, 0),
+      
+      price_change_rate = ifelse(baseline_price > 0,
+                               (latest_price - baseline_price) / baseline_price, 0),
+      
+      mobility_change = latest_mobility - baseline_mobility,
+      
+      crime_improvement_rate = case_when(
+        baseline_crime == 0 & latest_crime == 0 ~ 0,
+        baseline_crime == 0 & latest_crime > 0 ~ -1,
+        latest_crime == 0 & baseline_crime > 0 ~ 1,
+        baseline_crime > 0 & latest_crime > 0 ~ (baseline_crime - latest_crime) / baseline_crime,
+        TRUE ~ 0),
+      has_valid_income = !is.na(income_change_rate) & is.finite(income_change_rate),
+      has_valid_price = !is.na(price_change_rate) & is.finite(price_change_rate),
+      has_valid_mobility = !is.na(mobility_change) & is.finite(mobility_change),
+      has_valid_crime = !is.na(crime_improvement_rate) & is.finite(crime_improvement_rate))
+
+  quality_stats <- change_data %>%
+    summarise(total_lsoas = n(),
+      valid_income = sum(has_valid_income),
+      valid_price = sum(has_valid_price),
+      valid_mobility = sum(has_valid_mobility),
+      valid_crime = sum(has_valid_crime),
+      zero_baseline_crime = sum(baseline_crime == 0),
+      complete_data = sum(has_valid_income & has_valid_price & has_valid_mobility & has_valid_crime))
+
+  valid_data <- change_data %>%
+    mutate(income_change_rate = ifelse(is.finite(income_change_rate), income_change_rate, 0),
+      price_change_rate = ifelse(is.finite(price_change_rate), price_change_rate, 0),
+      mobility_change = ifelse(is.finite(mobility_change), mobility_change, 0),
+      crime_improvement_rate = ifelse(is.finite(crime_improvement_rate), crime_improvement_rate, 0))
+  
+  if(nrow(valid_data) == 0) {return(NULL)}
+
+  change_summary <- valid_data %>%
+    summarise(income_mean = round(mean(income_change_rate, na.rm = TRUE) * 100, 1),
+      income_sd = round(sd(income_change_rate, na.rm = TRUE) * 100, 1),
+      price_mean = round(mean(price_change_rate, na.rm = TRUE) * 100, 1),
+      price_sd = round(sd(price_change_rate, na.rm = TRUE) * 100, 1),
+      mobility_mean = round(mean(mobility_change, na.rm = TRUE), 3),
+      mobility_sd = round(sd(mobility_change, na.rm = TRUE), 3),
+      crime_mean = round(mean(crime_improvement_rate, na.rm = TRUE) * 100, 1),
+      crime_sd = round(sd(crime_improvement_rate, na.rm = TRUE) * 100, 1))
+
+  valid_data <- valid_data %>%
+    mutate(income_percentile = percent_rank(income_change_rate) * 100,
+      price_percentile = percent_rank(price_change_rate) * 100,
+      mobility_percentile = percent_rank(mobility_change) * 100,
+      crime_percentile = percent_rank(crime_improvement_rate) * 100,
+
+      income_minmax = {range_val = max(income_change_rate, na.rm = TRUE) - min(income_change_rate, na.rm = TRUE)
+        if(range_val > 0) {
+          (income_change_rate - min(income_change_rate, na.rm = TRUE)) / range_val * 100
+        } else {rep(50, length(income_change_rate))}},
+      price_minmax = {range_val = max(price_change_rate, na.rm = TRUE) - min(price_change_rate, na.rm = TRUE)
+        if(range_val > 0) {
+          (price_change_rate - min(price_change_rate, na.rm = TRUE)) / range_val * 100
+        } else {rep(50, length(price_change_rate))}},
+      mobility_minmax = { range_val = max(mobility_change, na.rm = TRUE) - min(mobility_change, na.rm = TRUE)
+        if(range_val > 0) {
+          (mobility_change - min(mobility_change, na.rm = TRUE)) / range_val * 100
+        } else {rep(50, length(mobility_change))}},
+      crime_minmax = {range_val = max(crime_improvement_rate, na.rm = TRUE) - min(crime_improvement_rate, na.rm = TRUE)
+        if(range_val > 0) {
+          (crime_improvement_rate - min(crime_improvement_rate, na.rm = TRUE)) / range_val * 100
+        } else {rep(50, length(crime_improvement_rate))}},
+
+      income_z = scale(income_change_rate)[,1],
+      price_z = scale(price_change_rate)[,1],
+      mobility_z = scale(mobility_change)[,1],
+      crime_z = scale(crime_improvement_rate)[,1],
+      
+      # Convert Z-scores to 0-100
+      income_z_scaled = pnorm(income_z) * 100,
+      price_z_scaled = pnorm(price_z) * 100,
+      mobility_z_scaled = pnorm(mobility_z) * 100,
+      crime_z_scaled = pnorm(crime_z) * 100,
+
+      index_percentile = (income_percentile * 0.30 + price_percentile * 0.30 +
+                         mobility_percentile * 0.25 + crime_percentile * 0.15),
+      
+      index_minmax = (income_minmax * 0.30 + price_minmax * 0.30 +
+                     mobility_minmax * 0.25 + crime_minmax * 0.15),
+      
+      index_zscore = (income_z_scaled * 0.30 + price_z_scaled * 0.30 +
+                     mobility_z_scaled * 0.25 + crime_z_scaled * 0.15),
+
+      dynamic_index = index_percentile,
+      
+      project = project_name,
+      method = "Percentile_Ranking",
+      baseline_year = baseline_year,
+      analysis_year = latest_year)
+
+  method_comparison <- valid_data %>%
+    summarise(percentile_min = round(min(index_percentile, na.rm = TRUE), 1),
+      percentile_max = round(max(index_percentile, na.rm = TRUE), 1),
+      percentile_mean = round(mean(index_percentile, na.rm = TRUE), 1),
+      percentile_sd = round(sd(index_percentile, na.rm = TRUE), 1),
+      
+      minmax_min = round(min(index_minmax, na.rm = TRUE), 1),
+      minmax_max = round(max(index_minmax, na.rm = TRUE), 1),
+      minmax_mean = round(mean(index_minmax, na.rm = TRUE), 1),
+      minmax_sd = round(sd(index_minmax, na.rm = TRUE), 1),
+      
+      zscore_min = round(min(index_zscore, na.rm = TRUE), 1),
+      zscore_max = round(max(index_zscore, na.rm = TRUE), 1),
+      zscore_mean = round(mean(index_zscore, na.rm = TRUE), 1),
+      zscore_sd = round(sd(index_zscore, na.rm = TRUE), 1))
+
+  n_areas <- nrow(valid_data)
+  
+  if(n_areas <= 5) {valid_data$dynamic_index <- valid_data$index_minmax
+    valid_data$method <- "MinMax_Small_Sample"} else if(n_areas <= 20) {
+    valid_data$dynamic_index <- valid_data$index_percentile
+    valid_data$method <- "Percentile_Medium_Sample"} else {valid_data$dynamic_index <- valid_data$index_zscore
+    valid_data$method <- "ZScore_Large_Sample"}
+  
+
+  classification <- valid_data %>%
+    mutate(gent_level = case_when(
+        dynamic_index >= 80 ~ "High Gentrification",
+        dynamic_index >= 70 ~ "Moderate Gentrification",
+        dynamic_index >= 60 ~ "Low Gentrification",
+        TRUE ~ "Stable")) %>%
+    count(gent_level, sort = TRUE)
+  
+  sample_detailed <- valid_data %>%
+    select(LSOA11CD,
+           income_change_rate, price_change_rate, mobility_change, crime_improvement_rate,
+           income_percentile, price_percentile, mobility_percentile, crime_percentile,
+           dynamic_index) %>%
+    slice_head(n = 5) %>%
+    mutate(across(where(is.numeric), ~round(.x, 2)))
+  
+  contributions <- valid_data %>%
+    mutate(income_contrib = income_percentile * 0.30,
+      price_contrib = price_percentile * 0.30,
+      mobility_contrib = mobility_percentile * 0.25,
+      crime_contrib = crime_percentile * 0.15) %>%
+    summarise(avg_income_contrib = round(mean(income_contrib, na.rm = TRUE), 2),
+      avg_price_contrib = round(mean(price_contrib, na.rm = TRUE), 2),
+      avg_mobility_contrib = round(mean(mobility_contrib, na.rm = TRUE), 2),
+      avg_crime_contrib = round(mean(crime_contrib, na.rm = TRUE), 2))
+  return(valid_data)}
+
+create_gentrification_map <- function(panel_data, gentrification_data, project_name,
+                                     station_location = NULL) {
+
+  spatial_geometry <- panel_data %>%
+    filter(year == max(year)) %>%
+    select(LSOA11CD, geometry) %>%
+    distinct(LSOA11CD, .keep_all = TRUE)
+  
+  map_data <- gentrification_data %>%
+    left_join(spatial_geometry, by = "LSOA11CD") %>%
+    st_as_sf()
+
+  map_data <- map_data %>%
+    mutate(gent_quartile = ntile(dynamic_index, 4),
+      gent_category = case_when(
+        gent_quartile == 4 ~ "High (Q4)",
+        gent_quartile == 3 ~ "Medium-High (Q3)",
+        gent_quartile == 2 ~ "Medium-Low (Q2)",
+        TRUE ~ "Low (Q1)"),
+      display_label = paste0(LSOA11CD, "\n", round(dynamic_index, 1)))
+  
+  if(is.null(station_location)) {
+    station_location <- st_centroid(st_union(map_data))}
+  
+  # Create map
+  p_map <- ggplot() +
+    geom_sf(data = map_data,
+            aes(fill = dynamic_index),
+            color = "white", size = 0.4, alpha = 0.9) +
+    
+    # Station
+    geom_sf(data = station_location,
+            color = "black", fill = "yellow",
+            size = 8, shape = 23, stroke = 3) +
+    
+    # Labels
+    geom_sf_text(data = map_data,
+                 aes(label = display_label),
+                 size = 3, color = "black", fontface = "bold") +
+    
+    # Color range
+    scale_fill_gradient2(
+      low = "#2166AC",
+      mid = "#F7F7F7",
+      high = "#A50026",
+      midpoint = mean(map_data$dynamic_index, na.rm = TRUE),
+      limits = c(floor(min(map_data$dynamic_index, na.rm = TRUE) / 10) * 10,
+        ceiling(max(map_data$dynamic_index, na.rm = TRUE) / 10) * 10),
+      breaks = pretty(range(map_data$dynamic_index, na.rm = TRUE), n = 5),
+      name = "Dynamic\nGentrification\nIndex",
+      guide = guide_colorbar(
+        barwidth = 2.5,
+        barheight = 20,
+        title.position = "top",
+        title.hjust = 0.5)) +
+    
+    annotation_north_arrow(
+      location = "tr",
+      pad_x = unit(0.3, "cm"),
+      pad_y = unit(0.3, "cm")) +
+    
+    annotation_scale(location = "bl",
+      width_hint = 0.25) +
+    
+    labs(title = paste0(project_name, ": Dynamic Gentrification Index"),
+      subtitle = paste0(
+        "Method: ", unique(gentrification_data$method),
+        " | Baseline: ", unique(gentrification_data$baseline_year),
+        " → Analysis: ", unique(gentrification_data$analysis_year),
+        " | Mean: ", round(mean(gentrification_data$dynamic_index, na.rm = TRUE), 1),
+        " | Range: ", round(min(gentrification_data$dynamic_index, na.rm = TRUE), 1),
+        "-", round(max(gentrification_data$dynamic_index, na.rm = TRUE), 1)),
+      caption = "Index uses adaptive method based on sample size") +
+    
+    theme_void() +
+    theme(plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 14, hjust = 0.5, color = "#555"),
+      plot.caption = element_text(size = 10, hjust = 0.5, color = "#333"),
+      legend.position = "right")
+  
+  return(list(map = p_map, data = map_data))}
+
+
+run_gentrification_analysis <- function(panel_data, treatment_year, project_name,
+                                       station_location = NULL) {
+  
+  # Calculate index
+  results <- calculate_dynamic_gentrification_index(panel_data, treatment_year, project_name)
+  
+  if(is.null(results)) {return(NULL)}
+
+  map_results <- create_gentrification_map(panel_data, results, project_name, station_location)
+  
+  if(is.null(map_results)) {return(NULL)}
+  
+  ggsave(paste0("gentrification_result/", project_name, "_Gentrification_Natural.png"),
+    map_results$map, width = 16, height = 12, dpi = 300, bg = "white")
+  
+  write.csv(results,
+    paste0("gentrification_result/", project_name, "_Gentrification_data_natural.csv"),
+    row.names = FALSE)
+  
+  return(list(data = results, map = map_results))}
+
+if(exists("nle_affected_metrics")) {
+  nle_results <- run_gentrification_analysis(
+    nle_affected_metrics, 2015, "NLE",
+    if(exists("nine_elms_station")) nine_elms_station else NULL)}
+
+if(exists("bre_affected_metrics")) {
+  bre_results <- run_gentrification_analysis(
+    bre_affected_metrics, 2016, "BRE",
+    if(exists("bre_station")) bre_station else NULL)}
+```
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(tidyr)
+library(grid)
+
+theme_set(theme_minimal())
+
+# Updated data based on new results
+data <- data.frame(
+  Outcome = c("income", "crime_rate", "house_price", "mobility",
+              "income", "crime_rate", "house_price", "mobility"),
+  Simple_DID = c(1447.579, 0, 9028.348, -0.007,
+                 3922.664, -0.002, -27652.532, -0.103),
+  Standard_DID = c(1447.235, 0, 9008.942, -0.007,
+                   3613.05, -0.002, -23572.147, -0.087),
+  No_COVID = c(1324.788, 0.001, 9182.995, -0.006,
+               3284.892, -0.002, -29037.775, -0.08),
+  SLM_Direct = c(1096.015, 0, 4645.546, 0,
+                 3613.246, -0.003, -21181.813, -0.087),
+  SLM_Indirect = c(258.896, 0, 22994.778, 0,
+                   -2801.905, -0.016, 63583.768, -0.032),
+  SEM_Coef = c(1203.583, 0, 9885.27, -0.006,
+               3652.298, -0.003, -22553.352, -0.084),
+  SDM_Local = c(1096.015, -0.001, 4645.546, -0.007,
+                3613.246, -0.003, -21181.813, -0.087),
+  KNN5_SLM = c(365.74, 0.017, 39432.044, 0.018,
+               3996.807, -0.002, -24150.776, 0),
+  KNN10_SLM = c(1286.024, 0.006, 7700.061, 0.008,
+                0, 0, 0, 0),
+  Synthetic = c(0, 0, 0, 0,
+                5629.869, -0.01, -27380.429, -0.022),
+  DR_DID = c(1977.929, -0.009, -2709.8, -0.007,
+             3825.675, -0.017, -13861.421, -0.071),
+  Bootstrap = c(1442.158, -0.001, 9122.088, -0.006,
+                3671.577, -0.003, -28618.53, -0.103),
+  Project = c(rep("NLE", 4), rep("BRE", 4))
+)
+
+# Pivot longer with updated column names
+data_long <- data %>%
+  pivot_longer(cols = c(Simple_DID, Standard_DID, No_COVID,
+                        SLM_Direct, SLM_Indirect, SEM_Coef, SDM_Local,
+                        KNN5_SLM, KNN10_SLM, Synthetic, DR_DID, Bootstrap),
+               names_to = "Method",
+               values_to = "Value")
+
+# Update factor levels and display names
+data_long$Method <- factor(data_long$Method,
+                           levels = c("Standard_DID", "Simple_DID", "No_COVID",
+                                      "DR_DID", "Bootstrap", "SLM_Direct", 
+                                      "SLM_Indirect", "SEM_Coef", "SDM_Local",
+                                      "KNN5_SLM", "KNN10_SLM", "Synthetic"))
+
+data_long$Method_Display <- gsub("_", " ", data_long$Method)
+data_long$Method_Display <- gsub("DID", "DiD", data_long$Method_Display)
+data_long$Method_Display <- gsub("SLM", "SLM", data_long$Method_Display)
+data_long$Method_Display <- gsub("SEM", "SEM", data_long$Method_Display)
+data_long$Method_Display <- gsub("SDM", "SDM", data_long$Method_Display)
+data_long$Method_Display <- gsub("KNN", "KNN", data_long$Method_Display)
+
+bre_color <- "#D73027"
+nle_color <- "#4575B4"
+
+create_chart <- function(outcome_name, y_label, y_limits = NULL) {
+  plot_data <- data_long %>%
+    filter(Outcome == outcome_name)
+  
+  p <- ggplot(plot_data, aes(x = Method_Display, y = Value, fill = Project)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.8),
+             width = 0.7, alpha = 0.8) +
+    scale_fill_manual(values = c("BRE" = bre_color, "NLE" = nle_color),
+                      labels = c("BRE", "NLE")) +
+    labs(x = "Estimation Method",
+         y = y_label,
+         fill = "Project") +
+    theme_minimal() +
+    theme(
+      panel.background = element_rect(fill = "white", color = NA),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_line(color = "#E0E0E0", size = 0.5),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9, color = "black"),
+      axis.text.y = element_text(size = 9, color = "black"),
+      axis.title = element_text(size = 10, color = "black"),
+      axis.title.x = element_text(margin = margin(t = 10)),
+      axis.title.y = element_text(margin = margin(r = 10)),
+      legend.position = c(0.85, 0.95),
+      legend.direction = "horizontal",
+      legend.title = element_text(size = 9),
+      legend.text = element_text(size = 8),
+      legend.background = element_rect(fill = "white", color = "grey80"),
+      legend.key.size = unit(0.4, "cm"),
+      plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"))
+  
+  if (!is.null(y_limits)) {
+    p <- p + coord_cartesian(ylim = y_limits)
+  }
+  
+  p <- p + geom_hline(yintercept = 0, linetype = "solid", color = "black", size = 0.3)
+  
+  return(p)
+}
+
+p1 <- create_chart("income", "Income Effect (£)") +
+  ggtitle("A. Impact on Household Income") +
+  theme(plot.title = element_text(size = 11, hjust = 0.5, face = "bold"))
+
+p2 <- create_chart("crime_rate", "Crime Rate Change") +
+  ggtitle("B. Impact on Crime Rate") +
+  theme(plot.title = element_text(size = 11, hjust = 0.5, face = "bold")) +
+  coord_cartesian(ylim = c(-0.025, 0.025))
+
+p3 <- create_chart("house_price", "House Price Effect (£)") +
+  ggtitle("C. Impact on House Prices") +
+  theme(plot.title = element_text(size = 11, hjust = 0.5, face = "bold"))
+
+p4 <- create_chart("mobility", "Mobility Change") +
+  ggtitle("D. Impact on Mobility") +
+  theme(plot.title = element_text(size = 11, hjust = 0.5, face = "bold")) +
+  coord_cartesian(ylim = c(-0.12, 0.04))
+
+main_title <- textGrob(
+  "Transport Infrastructure Impact Analysis: Comprehensive Model Comparison",
+  gp = gpar(fontsize = 14, fontface = "bold", col = "black"))
+
+sub_title <- textGrob(
+  "Northern Line Extension (NLE) vs Barking Riverside Extension (BRE)",
+  gp = gpar(fontsize = 12, fontface = "plain", col = "black"))
+
+final_plot <- grid.arrange(
+  main_title,
+  sub_title,
+  arrangeGrob(p1, p2, p3, p4, ncol = 2, nrow = 2),
+  heights = c(0.06, 0.04, 0.9),
+  ncol = 1)
+
+data_long_facet <- data_long %>%
+  mutate(Outcome_Label = case_when(
+      Outcome == "income" ~ "A. Impact on Household Income",
+      Outcome == "crime_rate" ~ "B. Impact on Crime Rate",
+      Outcome == "house_price" ~ "C. Impact on House Prices",
+      Outcome == "mobility" ~ "D. Impact on Mobility"),
+    Outcome_Label = factor(Outcome_Label,
+                           levels = c("A. Impact on Household Income",
+                                     "B. Impact on Crime Rate",
+                                     "C. Impact on House Prices",
+                                     "D. Impact on Mobility")))
+
+facet_plot <- ggplot(data_long_facet, aes(x = Method_Display, y = Value, fill = Project)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8),
+            width = 0.7, alpha = 0.8) +
+  facet_wrap(~ Outcome_Label, scales = "free_y", ncol = 2) +
+  scale_fill_manual(values = c("BRE" = bre_color, "NLE" = nle_color)) +
+  labs(title = "Transport Infrastructure Impact Analysis: Comprehensive Model Comparison",
+    subtitle = "Northern Line Extension (NLE) vs Barking Riverside Extension (BRE)",
+    x = "Estimation Method",
+    y = "Effect Size",
+    fill = "Project",
+    caption = "Note: Standard errors and significance levels available in detailed tables. SLM = Spatial Lag Model, SEM = Spatial Error Model, SDM = Spatial Durbin Model, DiD = Difference-in-Differences") +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(color = "#E0E0E0", size = 0.5),
+    strip.text = element_text(size = 10, face = "bold", hjust = 0),
+    strip.background = element_rect(fill = "#F5F5F5", color = "grey80"),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 8),
+    axis.title = element_text(size = 10),
+    plot.title = element_text(size = 14, hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    plot.caption = element_text(size = 9, hjust = 0),
+    legend.position = "bottom",
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)) +
+  geom_hline(yintercept = 0, linetype = "solid", color = "black", size = 0.3)
+
+ggsave("transport_impact_analysis_panels.png",
+       plot = final_plot,
+       width = 14,
+       height = 10,
+       units = "in",
+       dpi = 300,
+       bg = "white")
+
+ggsave("transport_impact_analysis_facet.png",
+       plot = facet_plot,
+       width = 12,
+       height = 10,
+       units = "in",
+       dpi = 300,
+       bg = "white")
+
+ggsave("transport_impact_analysis_panels.pdf",
+       plot = final_plot,
+       width = 14,
+       height = 10,
+       units = "in",
+       dpi = 300)
+
+ggsave("transport_impact_analysis_facet.pdf",
+       plot = facet_plot,
+       width = 12,
+       height = 10,
+       units = "in",
+       dpi = 300)
+
+summary_stats <- data_long %>%
+  group_by(Outcome, Project) %>%
+  summarise(Mean = round(mean(Value, na.rm = TRUE), 2),
+    Median = round(median(Value, na.rm = TRUE), 2),
+    SD = round(sd(Value, na.rm = TRUE), 2),
+    Min = round(min(Value, na.rm = TRUE), 2),
+    Max = round(max(Value, na.rm = TRUE), 2),
+    N_Methods = n(),
+    .groups = 'drop') %>%
+  arrange(Outcome, Project)
+
+print(summary_stats)
+
+key_findings <- data_long %>%
+  filter(Method == "Standard_DID") %>%
+  select(Outcome, Project, Value) %>%
+  pivot_wider(names_from = Project, values_from = Value) %>%
+  mutate(
+    Difference = BRE - NLE,
+    Ratio = round(BRE / NLE, 2))
+
+print(key_findings)
+```
+

@@ -1,0 +1,91 @@
+"0","# Step 5: 保存结果"
+"0","cat(""\n========================================\n"")"
+"1","
+========================================
+"
+"0","cat(""Saving Results\n"")"
+"1","Saving Results
+"
+"0","cat(""========================================\n"")"
+"1","========================================
+"
+"0","if(!dir.exists(""output"")) dir.create(""output"")"
+"0","if(!dir.exists(""figures"")) dir.create(""figures"")"
+"0",""
+"0","write_csv(nle_matched, ""output/nle_matched.csv"")"
+"0","write_csv(bre_matched, ""output/bre_matched.csv"")"
+"0","cat(""✓ Results saved\n"")"
+"1","✓ Results saved
+"
+"0","# Step 6: 最终统计和建议"
+"0","cat(""\n========================================\n"")"
+"1","
+========================================
+"
+"0","cat(""Final Analysis Recommendations\n"")"
+"1","Final Analysis Recommendations
+"
+"0","cat(""========================================\n"")"
+"1","========================================
+"
+"0","cat(""\n1. NLE Analysis ("", sum(nle_matched$treatment==1), ""treatment units):\n"")"
+"1","
+1. NLE Analysis ("
+"1"," "
+"1","12"
+"1"," "
+"1","treatment units):
+"
+"0","if(exists(""nle_trends"") && !is.na(nle_trends$ptal_diff)) {"
+"0","  if(abs(nle_trends$ptal_diff) > 0.5) {"
+"0","    cat(""   ⚠ Parallel trends marginally violated\n"")"
+"0","    cat(""   Suggested DID specification with trend control:\n"")"
+"0","    cat(""   lm(outcome ~ treatment*post + treatment:time + controls, data=nle)\n"")"
+"0","  } else {"
+"0","    cat(""   ✓ Standard DID appropriate\n"")"
+"0","    cat(""   lm(outcome ~ treatment*post + controls, data=nle)\n"")"
+"0","  }"
+"0","}"
+"1","   ⚠ Parallel trends marginally violated
+"
+"1","   Suggested DID specification with trend control:
+"
+"1","   lm(outcome ~ treatment*post + treatment:time + controls, data=nle)
+"
+"0","cat(""\n2. BRE Analysis ("", sum(bre_matched$treatment==1), ""treatment unit(s)):\n"")"
+"1","
+2. BRE Analysis ("
+"1"," "
+"1","2"
+"1"," "
+"1","treatment unit(s)):
+"
+"0","if(n_bre_treated == 1) {"
+"0","  cat(""   ✗ Single unit - DID not recommended\n"")"
+"0","  cat(""   Use Synthetic Control Method instead:\n"")"
+"0","  cat(""\n   # Install if needed: install.packages('Synth')\n"")"
+"0","  cat(""   library(Synth)\n"")"
+"0","  cat(""   # Code for synthetic control analysis...\n"")"
+"0","} else if(n_bre_treated <= 3) {"
+"0","  cat(""   ⚠ Small sample - interpret with extreme caution\n"")"
+"0","  cat(""   Report confidence intervals, not p-values\n"")"
+"0","}"
+"1","   ⚠ Small sample - interpret with extreme caution
+"
+"1","   Report confidence intervals, not p-values
+"
+"0","# Step 7: 平衡性检查"
+"0","cat(""\n========================================\n"")"
+"1","
+========================================
+"
+"0","cat(""Covariate Balance Summary\n"")"
+"1","Covariate Balance Summary
+"
+"0","cat(""========================================\n"")"
+"1","========================================
+"
+"0","balance_check(nle_matched, ""NLE"")"
+"2","Error in balance_check(nle_matched, ""NLE"") : 
+  could not find function ""balance_check""
+"

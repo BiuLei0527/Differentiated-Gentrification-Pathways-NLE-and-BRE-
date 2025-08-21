@@ -1,0 +1,1009 @@
+---
+title: "LSOAs Metrics for Testing"
+output: html_notebook
+---
+
+# Import packages
+
+```{r}
+library(dplyr)
+library(zoo)
+library(sae)
+library(readxl)
+library(tidyr)   
+library(readr)
+```
+
+# Import data from local files
+
+```{r} 
+file_path <- "/Users/xilver/Desktop/CASA0004/Data/income/2019_income.xlsx"
+income_2019 <- read_excel(file_path, sheet = "Total annual income", skip = 4) 
+income_2019 <- income_2019 %>%
+  filter(`Region name` == "London") %>%
+  dplyr::select( `MSOA code`, `MSOA name`, `Local authority code`, `Local authority name`, `Total annual income (£)`) 
+```
+
+
+```{r}
+years <- c(2011, 2013, 2015, 2017)
+
+income_list <- lapply(years, function(year) {
+  file_path <- paste0("/Users/xilver/Desktop/CASA0004/Data/income/", year, "_income.xls")
+
+  if (file.exists(file_path)) {
+    if (year %in% c(2011, 2013)) {
+      data <- read_excel(file_path, sheet = "Total weekly income", skip = 4)
+      data$`Total annual income (£)` <- data$`Total weekly income (£)` * 52.18} 
+    else { data <- read_excel(file_path, sheet = "Total annual income", skip = 4)
+      data$`Total annual income (£)` <- data$`Total annual income (£)`}
+    print(paste("Success:", file_path))
+    data <- data %>%
+      filter(`Region name` == "London")
+    
+    return(data)} else {arning(paste("No such files:", file_path))
+    return(NULL)}})
+
+names(income_list) <- paste0("income_", years)
+income_list <- Filter(Negate(is.null), income_list)
+
+list2env(income_list, .GlobalEnv)
+for (name in names(income_list)) {
+  print(paste(name, ":"))
+  print(head(get(name)))
+}
+```
+```{r}
+year_points <- c(2011.5, 2013.5, 2015.5, 2017.5, 2019.5)
+data_names <- c("income_2011", "income_2013", "income_2015", "income_2017", "income_2019")
+
+income_list <- lapply(seq_along(year_points), function(i) {
+  df <- get(data_names[i]) %>%
+    dplyr::select(`MSOA code`, `MSOA name`, `Local authority code`, `Local authority name`, `Total annual income (£)`) %>%
+    mutate(year = year_points[i])
+  return(df)})
+
+income_all <- bind_rows(income_list)
+income_all <- income_all %>%
+  rename(income = `Total annual income (£)`)
+
+income_interp <- income_all %>%
+  group_by( `MSOA code`, `MSOA name`, `Local authority code`, `Local authority name`) %>%
+  complete(year = seq(2011, 2022, by = 0.5)) %>% 
+  arrange(year) %>%
+  mutate(income = na.approx(income, x = year, na.rm = FALSE)) %>%
+  mutate(income = na.locf(income, na.rm = FALSE)) %>%         
+  mutate(income = na.locf(income, fromLast = TRUE, na.rm = FALSE)) %>%  
+  ungroup()
+
+income_yearly <- income_interp %>%
+  filter(year %% 1 == 0)
+```
+
+```{r}
+print(income_all)
+```
+# Sensitivity test
+
+```{r}
+library(ggplot2)
+
+sensitivity_test <- function(income_all, year_seq, fill_method) {
+  df <- income_all %>%
+    group_by(`MSOA code`, `MSOA name`,
+             `Local authority code`, `Local authority name`) %>%
+    complete(year = year_seq) %>%
+    arrange(year)
+  
+  if (fill_method == "Linear LOCF") {
+    df <- df %>%
+      mutate(income = na.approx(income, x = year, na.rm = FALSE)) %>%
+      mutate(income = na.locf(income, na.rm = FALSE)) %>%
+      mutate(income = na.locf(income, fromLast = TRUE, na.rm = FALSE))
+    } else if (fill_method == "Cubic Spline") {
+    df <- df %>%
+      group_by(`MSOA code`) %>%
+      mutate(income = spline(year, income, xout = year_seq)$y) %>%
+      ungroup() %>%
+      mutate(income = na.locf(income, na.rm = FALSE)) %>%
+      mutate(income = na.locf(income, fromLast = TRUE, na.rm = FALSE))
+    } else if (fill_method == "LOCF Forward") {
+    df <- df %>%
+      mutate(income = na.locf(income, na.rm = FALSE))
+    } else if (fill_method == "No Fill") {df <- df}
+  
+  df <- df %>% ungroup() %>% mutate(method = fill_method)
+  return(df)}
+
+year_seq <- seq(2011, 2022, by = 0.5)
+
+results_linear <- sensitivity_test(income_all, year_seq, "Linear LOCF")
+results_spline <- sensitivity_test(income_all, year_seq, "Cubic Spline")
+results_locf   <- sensitivity_test(income_all, year_seq, "LOCF Forward")
+results_no_fill<- sensitivity_test(income_all, year_seq, "No Fill")
+
+all_results <- bind_rows(results_linear, results_spline, results_locf, results_no_fill)
+
+ggplot(all_results, aes(x = year, y = income, color = method)) +
+  geom_line() +
+  facet_wrap(~ `MSOA code`, scales = "free_y") +
+  labs(title = "Sensitivity Test: Income Interpolation Methods",
+       x = "Year", y = "Income (£)") +
+  theme_minimal()
+
+baseline <- results_linear %>%
+  rename(income_baseline = income) %>%
+  dplyr::select(`MSOA code`, year, income_baseline)
+
+difference_summary <- all_results %>%
+  left_join(baseline, by = c("MSOA code", "year")) %>%
+  mutate(diff = income - income_baseline) %>%
+  group_by(method) %>%
+  summarise(mean_diff = mean(diff, na.rm = TRUE),
+            sd_diff = sd(diff, na.rm = TRUE)) %>%
+  arrange(method)
+
+print(difference_summary)
+```
+
+# Combining LSOA with MSOA
+
+```{r}
+lookup <- read_csv("/Users/xilver/Downloads/2011_lookup.csv", show_col_types = FALSE)
+lookup_clean <- lookup %>%
+  dplyr::select(MSOA11CD, LSOA11CD, LSOA11NM) %>%
+  distinct() 
+combined_lookup <- income_yearly %>%
+  rename(msoa_income = income) %>%
+  left_join(lookup_clean, by = c("MSOA code" = "MSOA11CD"), relationship = "many-to-many")
+```
+
+# Loading necessary variables - Claimant count 
+
+```{r}
+library(tidyverse)
+library(lubridate)
+
+lsoa_2011 <- st_read("/Users/xilver/Desktop/CASA0004/qgis_thesis/2011 lsoa.shp")
+
+claimant_count <- read_csv("/Users/xilver/Downloads/claimant count.csv",
+               skip = 8,
+               na = c("", "NA"),
+               show_col_types = FALSE)
+
+colnames(claimant_count)[1] <- "LSOA_info"
+
+claimant_count <- claimant_count %>%
+  filter(!is.na(LSOA_info)) %>%    
+  filter(!str_detect(LSOA_info, "Column Total")) %>% 
+  pivot_longer(cols = -LSOA_info, names_to = "month_year", values_to = "value") %>%
+  filter(!is.na(value)) %>%
+  separate(LSOA_info, into = c("LSOA_code", "LSOA_name"), sep = " : ") %>%
+  mutate(year = as.numeric(str_sub(month_year, -2)) + 2000) %>%
+  group_by(LSOA_code, LSOA_name, year) %>%
+  summarise(value = mean(value, na.rm = TRUE), .groups = "drop")
+```
+
+```{r}
+london_lsoas <- lsoa_2011$LSOA11CD %>% unique()
+
+london_claimant <- claimant_count %>%
+  filter(LSOA_code %in% london_lsoas)
+
+london_claimant_extended <- london_claimant %>%
+  group_by(LSOA_code) %>%
+  arrange(year) %>%
+  mutate(value = ifelse(year %in% 2011:2012, NA, value)) %>%
+  complete(year = 2011:2023) %>%  
+  arrange(year) %>%
+  mutate(value = na.approx(value, x = year, rule = 2)) %>%
+  ungroup()
+```
+
+# Population
+
+```{r}
+population <- read_csv("/Users/xilver/Downloads/population.csv",
+               skip = 6,
+               na = c("", "NA"),
+               show_col_types = FALSE)
+
+colnames(population)[1] <- "LSOA_info"
+
+population <- population %>% 
+  filter(!is.na(LSOA_info)) %>% 
+  filter(!str_detect(LSOA_info, "Column Total")) %>% 
+  pivot_longer(cols = -LSOA_info, names_to = "year", values_to = "value") %>% 
+  filter(!is.na(value)) %>% 
+  separate(LSOA_info, into = c("LSOA_code", "LSOA_name"), sep = " : ") %>% 
+  mutate(year = as.numeric(year))
+
+lsoa_2021 <- st_read("/Users/xilver/Desktop/CASA0004/qgis_thesis/2021 lsoa-backup.shp")
+
+lsoa_code_2021 <- lsoa_2021$lsoa21cd %>% unique()
+
+# Using best lookup
+lsoa_lookup_2011 <- st_read("/Users/xilver/Downloads/lookup_2011_2021.geojson")
+
+london_lookup <- lsoa_lookup_2011 %>%
+  filter(LSOA21CD %in% lsoa_code_2021)
+
+population_2021 <- read_excel(path = "/Users/xilver/Downloads/sapelsoasyoatablefinal.xlsx",
+  sheet = "Mid-2021 LSOA 2021",
+  skip = 3) %>%
+  dplyr::select(`LSOA 2021 Code`, `LSOA 2021 Name`, Total) 
+
+population_2021 <- bind_rows(population_2021, population_2022)
+
+london_lsoas_2021 <- london_lookup$LSOA21CD 
+
+population_2021_best <- population_2021 %>%
+   filter(`LSOA 2021 Code` %in% london_lsoas_2021)
+
+```
+
+# Using different lookup files
+
+```{r}
+# Using exact lookup 
+
+lookup_exact <- st_read("/Users/xilver/Downloads/lookup_exact.csv")
+
+london_lookup_exact <- lookup_exact %>%
+  filter(LSOA21CD %in% lsoa_code_2021)
+
+london_lsoas_2021_exact <- london_lookup_exact$LSOA21CD 
+
+population_2021_exact <- population_2021 %>%
+   filter(`LSOA 2021 Code` %in% london_lsoas_2021_exact)
+
+population_2021_with_2011 <- population_2021_exact %>%
+  left_join(london_lookup_exact %>% dplyr::select(LSOA21CD, LSOA11CD), 
+            by = c("LSOA 2021 Code" = "LSOA21CD"))
+```
+
+# Checking duplicated rows using exact lookup
+
+```{r}
+dup_2021 <- population_2021_with_2011 %>%
+  group_by(`LSOA 2021 Code`) %>%
+  filter(n() > 1) %>%
+  arrange(`LSOA 2021 Code`)
+
+nrow(dup_2021)
+
+dup_2021
+
+dup_2011 <- population_2021_with_2011 %>%
+  group_by(LSOA11CD) %>%
+  filter(n() > 1) %>%
+  arrange(LSOA11CD)
+
+nrow(dup_2011)
+
+dup_2011
+```
+
+```{r}
+split_counts <- population_2021_with_2011 %>%
+  group_by(`LSOA 2021 Code`) %>%
+  summarise(n_split = n(), .groups = "drop")
+
+population_adjusted <- population_2021_with_2011 %>%
+  left_join(split_counts, by = "LSOA 2021 Code") %>%
+  mutate(adjusted_population = Total / n_split)
+
+population_2011_unique <- population_adjusted %>%
+  group_by(LSOA11CD) %>%
+  summarise(population_2011 = sum(adjusted_population, na.rm = TRUE), .groups = "drop")
+
+# Compare different methods to calculate population from 2021 LSOA to 2011 LSOA
+
+population_2011_recomputed <- population_2021_with_2011 %>%
+  group_by(LSOA11CD) %>%
+  summarise(value = sum(Total, na.rm = TRUE), .groups = "drop") %>%
+  mutate(year = 2021)
+
+population_cleaned <- population %>%
+  dplyr::select(LSOA_code, value, year) %>%
+  filter(LSOA_code %in% london_lsoas)
+
+population_2021_final <- population_2011_recomputed %>%
+  rename(LSOA_code = LSOA11CD)
+
+population_all_years <- bind_rows(population_cleaned, population_2021_final)
+```
+
+# 2022 Population converting to 2011 lsoa
+
+```{r}
+population_2022 <- read_excel(
+  path = "/Users/xilver/Downloads/sapelsoasyoatablefinal.xlsx",
+  sheet = "Mid-2022 LSOA 2021",
+  skip = 3) %>%
+  dplyr::select(`LSOA 2021 Code`, `LSOA 2021 Name`, Total)
+
+population_2022_exact <- population_2022 %>%
+   filter(`LSOA 2021 Code` %in% london_lsoas_2021_exact)
+
+population_2022_with_2011 <- population_2022_exact %>%
+  left_join(london_lookup_exact %>% dplyr::select(LSOA21CD, LSOA11CD), 
+            by = c("LSOA 2021 Code" = "LSOA21CD"))
+
+population_2022_recomputed <- population_2022_with_2011 %>%
+  group_by(LSOA11CD) %>%
+  summarise(value = sum(Total, na.rm = TRUE), .groups = "drop") %>%
+  mutate(year = 2022)
+
+population_2022_final <- population_2022_recomputed %>%
+  rename(LSOA_code = LSOA11CD)
+
+population_all_years <- bind_rows(population_all_years, population_2022_final)
+
+```
+
+# House price
+
+```{r}
+library(stringr)
+
+house_price_raw <- read_excel("/Users/xilver/Desktop/CASA0004/Data/price paid data/median house price.xls", sheet = "1a", skip = 5)
+
+house_price_london <- house_price_raw %>%
+  filter(`LSOA code` %in% london_lsoas)
+
+target_cols <- c("Year ending Mar 2011", "Year ending Jun 2011", "Year ending Sep 2011", "Year ending Dec 2011",
+  "Year ending Mar 2012", "Year ending Jun 2012", "Year ending Sep 2012", "Year ending Dec 2012",
+  "Year ending Mar 2013", "Year ending Jun 2013", "Year ending Sep 2013", "Year ending Dec 2013",
+  "Year ending Mar 2014", "Year ending Jun 2014", "Year ending Sep 2014", "Year ending Dec 2014",
+  "Year ending Mar 2015", "Year ending Jun 2015", "Year ending Sep 2015", "Year ending Dec 2015",
+  "Year ending Mar 2016", "Year ending Jun 2016", "Year ending Sep 2016", "Year ending Dec 2016",
+  "Year ending Mar 2017", "Year ending Jun 2017", "Year ending Sep 2017", "Year ending Dec 2017",
+  "Year ending Mar 2018", "Year ending Jun 2018", "Year ending Sep 2018", "Year ending Dec 2018",
+  "Year ending Mar 2019", "Year ending Jun 2019", "Year ending Sep 2019", "Year ending Dec 2019",
+  "Year ending Mar 2020", "Year ending Jun 2020", "Year ending Sep 2020", "Year ending Dec 2020",
+  "Year ending Mar 2021", "Year ending Jun 2021", "Year ending Sep 2021", "Year ending Dec 2021",
+  "Year ending Mar 2022", "Year ending Jun 2022", "Year ending Sep 2022", "Year ending Dec 2022")
+
+id_cols <- c("LSOA code", "LSOA name") 
+
+house_price_filtered <- house_price_london %>%
+  dplyr::select(all_of(c(id_cols, target_cols)))
+
+house_price_long <- house_price_filtered %>%
+  pivot_longer(cols = starts_with("Year ending"),
+    names_to = "period",
+    values_to = "median_price")
+
+house_price_long <- house_price_long %>%
+  mutate(quarter_month = str_extract(period, "(?<=Year ending )\\w+"),
+    year = str_extract(period, "\\d{4}"),
+    quarter = recode(quarter_month, "Mar" = "Q1", "Jun" = "Q2", "Sep" = "Q3", "Dec" = "Q4"),
+    quarter_label = paste0(year, "-", quarter))
+
+house_price_long$median_price <- gsub(",", "", house_price_long$median_price)
+house_price_long$median_price <- gsub("£", "", house_price_long$median_price)
+house_price_long$median_price <- as.numeric(house_price_long$median_price)
+
+house_price_long <- house_price_long %>%
+  mutate(year = str_extract(period, "\\d{4}")) %>%
+  group_by(`LSOA code`, `LSOA name`, year) %>%
+  summarise(median_price = median(median_price, na.rm = TRUE), .groups = "drop")
+
+```
+
+# IMD
+
+```{r}
+imd_2004_2007 <- read_csv("/Users/xilver/Desktop/CASA0004/Data/imd/2004_imd.csv") %>%
+  dplyr::select(`LSOA`, `GOR NAME`, `2004IMD SCORE`, `2007IMD SCORE`) %>%
+  filter(`GOR NAME` == "London")
+
+imd_2010 <- read_csv("/Users/xilver/Desktop/CASA0004/Data/imd/2010_imd.csv") %>%
+  dplyr::select(`LSOA code (2011)`, `2010IMD adjusted`, `2015Index of Multiple Deprivation (IMD) Score`) 
+
+imd_2010_london <- imd_2010 %>%
+  filter(`LSOA code (2011)` %in% london_lsoas)
+
+imd_2019_london <- read_excel("/Users/xilver/Desktop/CASA0004/Data/imd/2019_imd.xlsx", sheet = "IMD 2019") %>%
+  dplyr::select(`LSOA code (2011)`, `LSOA name (2011)`, `Index of Multiple Deprivation (IMD) Score`) %>%
+  filter(`LSOA code (2011)` %in% london_lsoas)
+
+lookup_2001 <- read_csv("/Users/xilver/Downloads/2001_lookup.csv") %>%
+  dplyr::select(`LSOA01CD`,	`LSOA11CD`)
+
+lookup_2001_geo <- st_read("/Users/xilver/Downloads/2001_lookup.geojson") %>%
+  dplyr::select(`LSOA01CD`,	`LSOA11CD`)
+
+geo_2001 <- lookup_2001_geo %>%
+  filter(`LSOA11CD` %in% london_lsoas)
+
+imd_mapped_2004 <- imd_2004_2007 %>%
+  left_join(lookup_2001, by = c("LSOA" = "LSOA01CD")) %>%
+  group_by(LSOA11CD) %>%
+  summarise(imd2004 = mean(`2004IMD SCORE`),
+    imd2007 = mean(`2007IMD SCORE`))
+
+imd_2010_london <- imd_2010_london %>%
+  rename(LSOA11CD = `LSOA code (2011)`) %>%
+  dplyr::select(LSOA11CD, imd2010 = `2010IMD adjusted`, imd2015 = `2015Index of Multiple Deprivation (IMD) Score`)
+
+imd_2019_london <- imd_2019_london %>%
+  rename(LSOA11CD = `LSOA code (2011)`,
+         imd2019 = `Index of Multiple Deprivation (IMD) Score`) %>%
+  dplyr::select(LSOA11CD, imd2019)
+
+imd_all <- imd_mapped_2004 %>%
+  full_join(imd_2010_london, by = "LSOA11CD") %>%
+  full_join(imd_2019_london, by = "LSOA11CD")
+
+imd_long <- imd_all %>%
+  pivot_longer(
+    cols = starts_with("imd"),
+    names_to = "year",
+    values_to = "imd_score") %>%
+  mutate(year = gsub("imd", "", year)) %>%
+  arrange(LSOA11CD, year)
+
+all_years <- seq(2010, 2022, by = 1)
+
+imd_data <- imd_all %>%
+  dplyr::select(LSOA11CD, imd2010, imd2015, imd2019) %>%
+  pivot_longer(cols = starts_with("imd"), names_to = "year", values_to = "imd") %>%
+  mutate(year = case_when(year == "imd2010" ~ 2010,
+    year == "imd2015" ~ 2015,
+    year == "imd2019" ~ 2019))
+
+imd_interp <- imd_data %>%
+  group_by(LSOA11CD) %>%
+  complete(year = all_years) %>%
+  arrange(LSOA11CD, year) %>%
+  mutate(imd_interp = na.approx(imd, x = year, na.rm = FALSE, rule=2)) %>%
+  ungroup() %>%
+  dplyr::select(-imd)
+```
+
+# Combining all variables for LMER
+
+```{r}
+london_claimant_interpolated_filtered <- london_claimant_extended %>%
+  filter(year <= 2022) %>%
+  dplyr::select(-LSOA_name) %>%
+  rename(LSOA11CD = `LSOA_code`) %>%
+  mutate(year = as.numeric(year)) %>%
+  rename(claimant_value = value)
+
+imd_interp_filtered <- imd_interp %>%
+  filter(year != 2010) %>%
+  mutate(year = as.numeric(year))
+ 
+population_all_years <- population_all_years %>%
+  rename(LSOA11CD = `LSOA_code`) %>%
+  mutate(year = as.numeric(year)) %>%
+  rename(population = value)
+
+house_price_long <- house_price_long %>%
+  rename(LSOA11CD = `LSOA code`) %>%
+  mutate(year = as.numeric(year))
+
+combined_data <- population_all_years %>%
+  left_join(london_claimant_interpolated_filtered, by = c("LSOA11CD", "year"))
+
+combined_data <- combined_data %>%
+  left_join(imd_interp_filtered, by = c("LSOA11CD", "year"))
+
+combined_data <- combined_data %>%
+  left_join(house_price_long, by = c("LSOA11CD", "year"))
+
+combined_data <- combined_data %>%
+  left_join(combined_lookup, by = c("LSOA11CD", "year")) 
+
+combined_data_final <- combined_data %>%
+  mutate(claimant_rate = claimant_value / population * 100) %>%
+  dplyr::select(-claimant_value)
+```
+
+# Checking na value
+ 
+```{r}
+na_summary <- combined_data_final %>%
+  summarise(msoa_income_na = sum(is.na(msoa_income)),
+    median_price_na = sum(is.na(median_price)),
+    imd_interp_na = sum(is.na(imd_interp)),
+    population_na = sum(is.na(population)),
+    claimant_rate_na = sum(is.na(claimant_rate)),
+    total_complete_rows = sum(!is.na(msoa_income) & 
+                              !is.na(median_price) & 
+                              !is.na(imd_interp) & 
+                              !is.na(population) & 
+                              !is.na(claimant_rate)))
+	
+price_na_by_year <- combined_data_final %>%
+  group_by(year) %>%
+  summarise(total_rows = n(),
+    median_price_na = sum(is.na(median_price)),
+    median_price_available = sum(!is.na(median_price)),
+    na_percentage = round(sum(is.na(median_price)) / n() * 100, 2),
+    .groups = "drop") %>%
+  arrange(year)
+
+price_df <- combined_data_final %>%
+  dplyr::select(LSOA11CD, year, median_price) %>%
+  arrange(LSOA11CD, year)
+
+na_records <- price_df %>%
+  filter(is.na(median_price)) %>%
+  dplyr::select(LSOA11CD, year, median_price) %>%
+  arrange(LSOA11CD, year)
+
+```
+
+# Fill NA with transcation price and interpolating
+
+```{r}
+postcode_2011 <- read.csv("/Users/xilver/Downloads/postcode_2011.csv", 
+                         encoding = "UTF-8")
+
+postcode_london <- postcode_2011 %>% filter(LSOA11CD %in% london_lsoas)
+
+na_postcode <- na_records %>%
+  left_join(postcode_london %>% dplyr::select(LSOA11CD, PCD8, LAD11NM), 
+            by = "LSOA11CD") %>%
+  filter(is.na(median_price)) %>%
+  dplyr::select(PCD8, LSOA11CD, LAD11NM, year, median_price)
+
+districts <- na_postcode %>%
+  ungroup() %>%
+  distinct(LAD11NM) %>%
+  pull(LAD11NM) %>%
+  na.omit()
+
+convert_to_filename <- function(district_name) {
+  district_name %>%
+    str_replace_all(" ", "_") %>%       
+    str_replace_all("[^A-Za-z0-9_]", "")}
+
+file_data_list <- list()
+base_path <- "/Users/xilver/Desktop/CASA0004/Data/price paid data/hpm_la_2024/" 
+
+for(district in districts) {
+  filename <- paste0(convert_to_filename(district), "_link_26122024.csv")
+  filepath <- paste0(base_path, filename)
+  tryCatch({
+    file_data <- read_csv(filepath, show_col_types = FALSE) %>%
+      dplyr::select(year, price, postcode, lad23cd)  
+    file_data_list[[district]] <- file_data
+    print(paste("Success:", filename, "rows:", nrow(file_data)))}, error = function(e) {
+    print(paste("No such files:", filename))})}
+
+if(length(file_data_list) > 0) {
+  all_district_data <- bind_rows(file_data_list)
+  print(paste("Success:", length(file_data_list), "files"))
+  print(paste("Total rows:", nrow(all_district_data)))
+  col_names <- colnames(all_district_data)
+  cat("Column names:", paste(col_names, collapse = ", "), "\n")
+  head(all_district_data)} else {print("Failure")}
+
+postcode_lsoa_mapping <- na_postcode %>%
+  ungroup() %>%
+  distinct(PCD8, LSOA11CD) %>%
+  filter(!is.na(PCD8) & !is.na(LSOA11CD)) %>%
+  mutate(PCD8 = str_squish(PCD8))  
+
+target_postcodes <- postcode_lsoa_mapping %>%
+  pull(PCD8)
+
+filtered_district <- all_district_data %>%
+  filter(postcode %in% target_postcodes & year >= 2010) %>%
+  dplyr::select(year, price, postcode, lad23cd) %>%
+  left_join(postcode_lsoa_mapping, by = c("postcode" = "PCD8")) %>%
+  dplyr::select(LSOA11CD, year, price, postcode, lad23cd)
+
+cleaned_district <- filtered_district %>%
+  group_by(LSOA11CD, year) %>%
+  mutate(total_count = n(),
+         q75 = quantile(price, 0.75, na.rm = TRUE),
+         q25 = quantile(price, 0.25, na.rm = TRUE),
+         iqr = q75 - q25,
+         is_outlier = case_when(
+           total_count >= 10 & (price > q75 + 1.5 * iqr | price < q25 - 1.5 * iqr) ~ TRUE,
+           TRUE ~ FALSE)) %>%
+  filter(!is_outlier) %>%
+  ungroup() %>%
+  dplyr::select(LSOA11CD, year, price, postcode, lad23cd)
+
+lsoa_prices <- cleaned_district %>%
+  group_by(LSOA11CD, year) %>%
+  summarise(median_price_new = median(price, na.rm = TRUE),
+    mean_price = mean(price, na.rm = TRUE),.groups = "drop")
+
+lsoa_prices_new <- lsoa_prices %>%
+  group_by(LSOA11CD) %>%
+  arrange(year) %>%
+  mutate(lsoa_median = median(median_price_new, na.rm = TRUE),
+         lsoa_sd = sd(median_price_new, na.rm = TRUE),
+         z_score = (median_price_new - lsoa_median) / lsoa_sd,
+         is_outlier = abs(z_score) > 3,
+         median_price_clean = ifelse(is_outlier, NA_real_, median_price_new)) %>%
+  ungroup()
+
+fill_data <- lsoa_prices_new %>%
+  dplyr::select(LSOA11CD, year, median_price_clean) %>%
+  mutate(LSOA11CD = as.character(str_squish(LSOA11CD)), 
+         year = as.integer(year)) %>%  
+  filter(!is.na(median_price_clean))
+
+price_df <- price_df %>%
+  mutate(LSOA11CD = as.character(str_squish(LSOA11CD)),
+         year = as.integer(year))
+
+price_df_filled <- price_df %>%
+  group_by(LSOA11CD) %>%
+  complete(year = 2010:2024) %>%  
+  ungroup() %>%
+  left_join(fill_data, by = c("LSOA11CD", "year")) %>%
+  mutate(median_price = coalesce(median_price, median_price_clean), 
+         median_price = if_else(median_price <= 0, NA_real_, median_price)) %>%
+  dplyr::select(-median_price_clean)
+
+price_df_interp <- price_df_filled %>%
+  group_by(LSOA11CD) %>%
+  arrange(year) %>%
+  mutate(valid_count = sum(!is.na(median_price)),
+         lsoa_median = median(median_price, na.rm = TRUE),
+         interpolated_price = case_when(valid_count >= 2 ~ {tryCatch({zoo::na.approx(median_price, year, na.rm = FALSE)}, error = function(e) median_price)},
+           TRUE ~ median_price),
+         filled_price = case_when(valid_count >= 1 ~ {tryCatch({zoo::na.locf(zoo::na.locf(interpolated_price, na.rm = FALSE), na.rm = FALSE, fromLast = TRUE)}, error = function(e) interpolated_price)},
+           TRUE ~ interpolated_price),
+         median_price_final = case_when(
+           !is.na(median_price) ~ median_price,
+           !is.na(filled_price) ~ filled_price,
+           TRUE ~ lsoa_median)) %>% 
+  ungroup() %>%
+  filter(year >= 2011 & year <= 2022) %>%  
+  dplyr::select(LSOA11CD, year, median_price = median_price_final)
+
+combined_data_final_ver <- combined_data_final %>%
+  dplyr::select(-median_price) %>%
+  left_join(price_df_interp %>% dplyr::select(LSOA11CD, year, median_price), 
+            by = c("LSOA11CD", "year"))
+
+na_summary2 <- combined_data_final_ver %>%
+  summarise(msoa_income_na = sum(is.na(msoa_income)),
+    median_price_na = sum(is.na(median_price)),
+    imd_interp_na = sum(is.na(imd_interp)),
+    population_na = sum(is.na(population)),
+    claimant_rate_na = sum(is.na(claimant_rate)),
+    total_complete_rows = sum(!is.na(msoa_income) & 
+                              !is.na(median_price) & 
+                              !is.na(imd_interp) & 
+                              !is.na(population) & 
+                              !is.na(claimant_rate)))
+```
+
+# Estamating LSOA-income using mixed effect model
+
+```{r}
+library(lme4)
+library(performance)
+library(moments)
+library(ggplot2)
+library(patchwork)
+library(scales)
+
+msoa_to_lsoa_downscaling <- function(data = combined_data_final_ver, output_file = "lsoa_income_estimates.csv", create_plots = TRUE) {
+
+  # Clean and prepare data
+
+  data_clean <- data %>%
+    filter(!is.na(msoa_income) & !is.na(median_price) & !is.na(imd_interp) &
+           !is.na(population) & !is.na(claimant_rate)) %>%
+    mutate( log_income = log(msoa_income + 1),
+      log_price = log(median_price + 1),
+      log_pop = log(population + 1),
+      imd_inverse = 1 / (imd_interp + 0.1),
+      employment_rate = 1 - claimant_rate / 100)
+
+  data_std <- data_clean %>%
+    group_by(year) %>%
+    mutate(price_std = scale(log_price)[,1],
+      pop_std = scale(log_pop)[,1],
+      imd_std = scale(imd_inverse)[,1],
+      emp_std = scale(employment_rate)[,1]) %>%
+    ungroup()
+
+  model <- lmer(log_income ~ price_std + pop_std + imd_std + emp_std + factor(year) +
+      (1 | `MSOA code`),
+    data = data_std,
+    REML = TRUE,
+    control = lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000)))
+
+  fixed_effects <- fixef(model)
+  icc_val <- performance::icc(model)
+
+  data_std$log_pred <- predict(model, newdata = data_std)
+  data_std$lsoa_income_raw <- exp(data_std$log_pred) - 1
+
+  sigma_res <- sigma(model)
+  ranef_var <- VarCorr(model)$`MSOA code`[1]
+  data_std$se_pred <- sqrt(sigma_res^2 + ranef_var) * exp(data_std$log_pred)
+
+  adjusted_data <- data_std %>%
+    group_by(`MSOA code`, year) %>%
+    mutate( pop_weight = population / sum(population),
+      msoa_pred_avg = sum(lsoa_income_raw * pop_weight),
+      adjustment_factor = msoa_income / msoa_pred_avg,
+      lsoa_income_final = lsoa_income_raw * adjustment_factor,
+      se_adjusted = se_pred * adjustment_factor,
+      ci_lower = pmax(lsoa_income_final - 1.96 * se_adjusted, 0),
+      ci_upper = lsoa_income_final + 1.96 * se_adjusted) %>%
+    ungroup()
+
+  constraint_check <- adjusted_data %>%
+    group_by(`MSOA code`, year) %>%
+    summarise(msoa_original = first(msoa_income),
+      msoa_reconstructed = sum(lsoa_income_final * population) / sum(population),
+      diff = abs(msoa_original - msoa_reconstructed),
+      diff_pct = diff / msoa_original * 100,
+      .groups = "drop")
+
+  r2_marginal <- performance::r2(model)$R2_marginal
+  r2_conditional <- performance::r2(model)$R2_conditional
+
+  residuals <- residuals(model)
+
+  lsoa_variation <- adjusted_data %>%
+    group_by(`MSOA code`, year) %>%
+    summarise(cv = sd(lsoa_income_final) / mean(lsoa_income_final) * 100,
+      range_ratio = max(lsoa_income_final) / min(lsoa_income_final),
+      .groups = "drop")
+
+  final_output <- adjusted_data %>%
+    dplyr::select(lsoa_code = LSOA11CD,
+      msoa_code = `MSOA code`,
+      year,
+      lsoa_income_estimate = lsoa_income_final,
+      standard_error = se_adjusted,
+      ci_lower,
+      ci_upper,
+      population,
+      median_price,
+      imd_score = imd_interp,
+      claimant_rate,
+      adjustment_factor) %>%
+    arrange(year, msoa_code, lsoa_code)
+
+  write.csv(final_output, output_file, row.names = FALSE)
+
+  if(create_plots) {
+    # Plot 1: Predicted vs Original Income
+    p1 <- adjusted_data %>%
+      sample_n(min(5000, nrow(.))) %>%
+      ggplot(aes(x = msoa_income, y = lsoa_income_final)) +
+      geom_point(alpha = 0.3, color = "steelblue") +
+      geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+      labs(title = "LSOA Predicted Income vs MSOA Original Income",
+           x = "MSOA Income (£)", y = "LSOA Predicted Income (£)") +
+      theme_minimal() +
+      scale_x_continuous(labels = scales::comma) +
+      scale_y_continuous(labels = scales::comma)
+
+    # Plot 2: Adjustment Factor Distribution
+    p2 <- adjusted_data %>%
+      ggplot(aes(x = adjustment_factor)) +
+      geom_histogram(bins = 50, fill = "coral", alpha = 0.7) +
+      geom_vline(xintercept = 1, color = "red", linetype = "dashed") +
+      labs(title = "Distribution of MSOA Consistency Adjustment Factors",
+           subtitle = "Values close to 1 indicate accurate initial predictions",
+           x = "Adjustment Factor", y = "Frequency") +
+      theme_minimal()
+
+    # Plot 3: Time Trends
+    p3 <- adjusted_data %>%
+      group_by(year) %>%
+      summarise(mean = mean(lsoa_income_final),
+        median = median(lsoa_income_final),
+        q25 = quantile(lsoa_income_final, 0.25),
+        q75 = quantile(lsoa_income_final, 0.75),
+        .groups = "drop") %>%
+      ggplot(aes(x = year)) +
+      geom_ribbon(aes(ymin = q25, ymax = q75), alpha = 0.2, fill = "blue") +
+      geom_line(aes(y = mean), color = "blue", size = 1.2) +
+      geom_line(aes(y = median), color = "red", size = 1.2, linetype = "dashed") +
+      geom_point(aes(y = mean), color = "blue", size = 2) +
+      geom_point(aes(y = median), color = "red", size = 2) +
+      labs(title = "LSOA Income Time Trends",
+           subtitle = "Solid line = Mean, Dashed line = Median, Shaded area = IQR",
+           x = "Year", y = "Income (£)") +
+      theme_minimal() +
+      scale_y_continuous(labels = scales::comma)
+
+    # Plot 4: Covariate Importance
+    p4 <- data.frame(variable = c("Price", "Population", "IMD", "Employment"),
+      coefficient = fixed_effects[c("price_std", "pop_std", "imd_std", "emp_std")]) %>%
+      ggplot(aes(x = reorder(variable, coefficient), y = coefficient)) +
+      geom_col(fill = "darkgreen", alpha = 0.7) +
+      coord_flip() +
+      labs(title = "Covariate Effect Sizes", x = "", y = "Standardized Coefficient") +
+      theme_minimal()
+
+    combined_plot <- (p1 + p2) / (p3 + p4) +
+      plot_annotation(title = "MSOA to LSOA Income Downscaling Analysis Results",
+        subtitle = paste0("Data: ", n_distinct(adjusted_data$LSOA11CD), " LSOAs, ",
+                         min(adjusted_data$year), "-", max(adjusted_data$year)))
+
+    ggsave("lsoa_income_analysis.png", combined_plot, width = 12, height = 10, dpi = 300)}
+
+  yearly_summary <- final_output %>%
+    group_by(year) %>%
+    summarise(lsoa_count = n(),
+      mean_income = mean(lsoa_income_estimate),
+      median_income = median(lsoa_income_estimate),
+      sd_income = sd(lsoa_income_estimate),
+      min_income = min(lsoa_income_estimate),
+      max_income = max(lsoa_income_estimate),
+      .groups = "drop") %>%
+    mutate(across(where(is.numeric), ~round(., 0)))
+
+
+  # Return results
+  return(list(model = model,
+    final_output = final_output,
+    summary = yearly_summary,
+    validation = list(r2_marginal = r2_marginal,
+      r2_conditional = r2_conditional,
+      icc = icc_val$ICC_adjusted,
+      constraint_check = constraint_check)))}
+
+# Run analysis
+results <- msoa_to_lsoa_downscaling(
+  data = combined_data_final_ver,
+  output_file = "lsoa_income_estimates.csv",
+  create_plots = TRUE)
+
+# Quick diagnostics function
+
+quick_diagnostics <- function(results) {
+  income_stats <- results$final_output$lsoa_income_estimate
+  within_var <- results$final_output %>%
+    group_by(msoa_code, year) %>%
+    summarise(n = n(),
+      cv = sd(lsoa_income_estimate) / mean(lsoa_income_estimate) * 100,
+      .groups = "drop")
+
+  time_check <- results$final_output %>%
+    arrange(lsoa_code, year) %>%
+    group_by(lsoa_code) %>%
+    mutate(change = lsoa_income_estimate - lag(lsoa_income_estimate),
+      pct_change = change / lag(lsoa_income_estimate) * 100) %>%
+    filter(!is.na(pct_change))
+
+  return(invisible(NULL))}
+
+# Run diagnostics
+quick_diagnostics(results)
+```
+
+# Clipping Effected LSOAs using 960m buffer zone 
+
+```{r}
+library(sf)
+
+# Importing affected lsoas around station
+
+nle_path <- "/Users/xilver/Desktop/CASA0004/qgis_thesis/clip nle 2011.shp"
+bre_path <- "/Users/xilver/Desktop/CASA0004/qgis_thesis/clip bre 2011.shp"
+
+nle_2011 <- st_read(nle_path) %>%
+  mutate(area = st_area(.))
+
+bre_2011 <- st_read(bre_path) %>%
+  mutate(area = st_area(.))
+
+lsoa_2011 <- lsoa_2011 %>%
+  mutate(area = st_area(.))
+
+crs_consistent <- identical(st_crs(lsoa_2011), st_crs(nle_2011)) && 
+                 identical(st_crs(lsoa_2011), st_crs(bre_2011))
+
+lsoa_2011$area_num <- as.numeric(lsoa_2011$area)
+nle_2011$area_num <- as.numeric(nle_2011$area)  
+bre_2011$area_num <- as.numeric(bre_2011$area)
+
+area_comparison <- data.frame(
+  LSOA11CD = lsoa_2011$LSOA11CD,
+  original_area = lsoa_2011$area_num)
+
+nle_affected <- nle_2011 %>%
+  mutate(nle_area = area_num) %>%
+  left_join(area_comparison, by = "LSOA11CD") %>%
+  mutate( nle_ratio = nle_area / original_area,
+    treatment = "NLE",
+    treatment_year = 2015) %>%
+  filter(nle_ratio > 0.5) %>%
+  dplyr::select(LSOA11CD, nle_ratio, treatment, treatment_year, geometry)
+
+bre_affected <- bre_2011 %>%
+  mutate(bre_area = area_num) %>%
+  left_join(area_comparison, by = "LSOA11CD") %>%
+  mutate(bre_ratio = bre_area / original_area,
+    treatment = "BRE",
+    treatment_year = 2016) %>%
+  filter(bre_ratio > 0.2) %>%
+  dplyr::select(LSOA11CD, bre_ratio, treatment, treatment_year, geometry)
+```
+
+# New 1500m-buffer zone clipping 
+
+```{r}
+nle_new_path <- "/Users/xilver/Desktop/CASA0004/qgis_thesis/clipped new nle.shp"
+bre_new_path <- "/Users/xilver/Desktop/CASA0004/qgis_thesis/clipped new bre.shp"
+
+nle_new <- st_read(nle_new_path) %>%
+  mutate(area = st_area(.))
+
+bre_new <- st_read(bre_new_path) %>%
+  mutate(area = st_area(.))
+
+nle_new$area_num <- as.numeric(nle_new$area)  
+bre_new$area_num <- as.numeric(bre_new$area)
+
+nle_affected_new <- nle_new %>%
+  mutate(nle_area = area_num) %>%
+  left_join(area_comparison, by = "LSOA11CD") %>%
+  mutate(nle_ratio = nle_area / original_area,
+    treatment = "NLE",
+    treatment_year = 2015) %>%
+  filter(nle_ratio > 0.5) %>%
+  dplyr::select(LSOA11CD, nle_ratio, treatment, treatment_year, geometry)
+
+bre_affected_new <- bre_new %>%
+  mutate(bre_area = area_num) %>%
+  left_join(area_comparison, by = "LSOA11CD") %>%
+  mutate(bre_ratio = bre_area / original_area,
+    treatment = "BRE",
+    treatment_year = 2016) %>%
+  filter(bre_ratio > 0.4) %>%
+  dplyr::select(LSOA11CD, bre_ratio, treatment, treatment_year, geometry)
+```
+
+# Descriptive statistics
+
+```{r}
+variables_to_analyze <- c("claimant_rate", "median_price", "population", "imd_interp")
+
+calculate_descriptive_stats <- function(data, vars) {
+  
+  stats_df <- data.frame(
+    Variable = character(),
+    Mean = numeric(),
+    Median = numeric(),
+    SD = numeric(),
+    Min = numeric(),
+    Max = numeric(),
+    stringsAsFactors = FALSE)
+ 
+  for (var in vars) {if (var %in% names(data)) {var_data <- data[[var]]
+      var_data <- var_data[!is.na(var_data)]
+      
+      if (length(var_data) > 0) {
+        stats_row <- data.frame(Variable = var,
+          Mean = round(mean(var_data, na.rm = TRUE), 2),
+          Median = round(median(var_data, na.rm = TRUE), 2),
+          SD = round(sd(var_data, na.rm = TRUE), 2),
+          Min = round(min(var_data, na.rm = TRUE), 2),
+          Max = round(max(var_data, na.rm = TRUE), 2))
+        stats_df <- rbind(stats_df, stats_row)
+      } else {cat(paste("Warning：Variable", var, "no valid data\n"))
+      }} else {cat(paste("Warning：Variable", var, "not exist\n"))}}
+  
+  return(stats_df)}
+
+
+descriptive_stats <- calculate_descriptive_stats(combined_data_final_ver, variables_to_analyze)
+
+print(descriptive_stats, row.names = FALSE)
+
+output_filename <- "descriptive_statistics.csv"
+write.csv(descriptive_stats, output_filename, row.names = FALSE)
+```

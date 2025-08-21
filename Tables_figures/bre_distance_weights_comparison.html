@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<style>
+body {
+    background-color: white;
+    font-family: Arial, Helvetica, sans-serif;
+    margin: 20px;
+    line-height: 1.4;
+}
+
+.container {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.main-title {
+    font-size: 16pt;
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 30px;
+    color: #2c3e50;
+}
+
+.charts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 25px;
+    margin-bottom: 25px;
+}
+
+.chart-container {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.chart-title {
+    font-size: 12pt;
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 15px;
+    color: #34495e;
+}
+
+.chart {
+    width: 100%;
+    height: 320px;
+    position: relative;
+}
+
+.legend {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    margin-top: 20px;
+    font-size: 11pt;
+    border-top: 1px solid #eee;
+    padding-top: 15px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.legend-color {
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    border: 1px solid #333;
+}
+
+.notes {
+    font-size: 10pt;
+    margin-top: 25px;
+    line-height: 1.6;
+    color: #555;
+    border-top: 2px solid #333;
+    padding-top: 15px;
+}
+
+.notes p {
+    margin-bottom: 8px;
+}
+
+.notes strong {
+    color: #333;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+    <div class="main-title">Barking Riverside Extension (BRE): Distance Weight Matrix Sensitivity Analysis</div>
+    
+    <div class="charts-grid">
+        <div class="chart-container">
+            <div class="chart-title">A. Income Effects (£/year)</div>
+            <canvas id="income-chart" class="chart"></canvas>
+        </div>
+        
+        <div class="chart-container">
+            <div class="chart-title">B. Crime Rate Effects</div>
+            <canvas id="crime-chart" class="chart"></canvas>
+        </div>
+        
+        <div class="chart-container">
+            <div class="chart-title">C. House Price Effects (£)</div>
+            <canvas id="house-chart" class="chart"></canvas>
+        </div>
+        
+        <div class="chart-container">
+            <div class="chart-title">D. Mobility Index Effects</div>
+            <canvas id="mobility-chart" class="chart"></canvas>
+        </div>
+    </div>
+    
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-color" style="background-color: #2E7D32;"></div>
+            <span>dist_5992 (Optimal, Suitability: 5)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background-color: #1976D2;"></div>
+            <span>dist_2996 (Good, Suitability: 4)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background-color: #D32F2F;"></div>
+            <span>dist_11985 (Fair, Suitability: 3)</span>
+        </div>
+    </div>
+
+    <div class="notes">
+        <p><strong>Notes:</strong></p>
+        <p>• <strong>Model Specifications:</strong> SLM = Spatial Lag Model (Direct, Indirect, Total effects); SEM = Spatial Error Model; SDM = Spatial Durbin Model (Local, Spatial effects)</p>
+        <p>• <strong>Distance Weights:</strong> Based on Euclidean distance bands with varying suitability scores. Optimal weight (dist_5992) selected through model comparison.</p>
+        <p>• <strong>Missing Values:</strong> Empty bars indicate model non-convergence or inapplicability for specific distance weight configurations</p>
+        <p>• <strong>Sample:</strong> n=4 treated units, n=14 control units, intervention year: 2016</p>
+        <p>• <strong>Interpretation:</strong> Results demonstrate sensitivity of spatial effects to weight matrix specification, with extreme spatial effects observed under dist_11985 showing potential model instability</p>
+    </div>
+</div>
+
+<script>
+const data = {
+    income: {
+        'dist_5992': {SLM_Direct: 3613.246, SLM_Indirect: -2801.905, SLM_Total: 4612.922, SEM_Coef: 3652.298, SDM_Local: 3613.246, SDM_Spatial: -2801.905},
+        'dist_2996': {SLM_Direct: 3890.759, SLM_Indirect: -2163.407, SLM_Total: 2153.129, SEM_Coef: 3817.254, SDM_Local: 3890.759, SDM_Spatial: -2163.407},
+        'dist_11985': {SLM_Direct: null, SLM_Indirect: null, SLM_Total: null, SEM_Coef: 3510.298, SDM_Local: 6048.73, SDM_Spatial: 80874.468}
+    },
+    crime_rate: {
+        'dist_5992': {SLM_Direct: -0.003, SLM_Indirect: -0.016, SLM_Total: -0.013, SEM_Coef: -0.003, SDM_Local: -0.003, SDM_Spatial: -0.016},
+        'dist_2996': {SLM_Direct: -0.004, SLM_Indirect: 0.007, SLM_Total: 0.003, SEM_Coef: -0.001, SDM_Local: -0.004, SDM_Spatial: 0.007},
+        'dist_11985': {SLM_Direct: null, SLM_Indirect: null, SLM_Total: null, SEM_Coef: -0.001, SDM_Local: -0.005, SDM_Spatial: -0.113}
+    },
+    house_price: {
+        'dist_5992': {SLM_Direct: -21181.813, SLM_Indirect: 63583.768, SLM_Total: 35525.32, SEM_Coef: -22553.352, SDM_Local: -21181.813, SDM_Spatial: 63583.768},
+        'dist_2996': {SLM_Direct: -23544.069, SLM_Indirect: 12745.716, SLM_Total: -10731.709, SEM_Coef: -23274.951, SDM_Local: -23544.069, SDM_Spatial: 12745.716},
+        'dist_11985': {SLM_Direct: null, SLM_Indirect: null, SLM_Total: null, SEM_Coef: -23843.162, SDM_Local: -17094.473, SDM_Spatial: -218979.655}
+    },
+    mobility: {
+        'dist_5992': {SLM_Direct: -0.087, SLM_Indirect: -0.032, SLM_Total: -0.148, SEM_Coef: -0.084, SDM_Local: -0.087, SDM_Spatial: -0.032},
+        'dist_2996': {SLM_Direct: -0.086, SLM_Indirect: -0.032, SLM_Total: -0.098, SEM_Coef: -0.088, SDM_Local: -0.086, SDM_Spatial: -0.032},
+        'dist_11985': {SLM_Direct: null, SLM_Indirect: null, SLM_Total: null, SEM_Coef: -0.079, SDM_Local: -0.067, SDM_Spatial: -0.852}
+    }
+};
+
+const colors = {
+    'dist_5992': '#2E7D32',   // Dark green for optimal
+    'dist_2996': '#1976D2',   // Blue for good
+    'dist_11985': '#D32F2F'   // Red for fair
+};
+
+const weights = ['dist_5992', 'dist_2996', 'dist_11985'];
+const models = ['SLM_Direct', 'SLM_Indirect', 'SLM_Total', 'SEM_Coef', 'SDM_Local', 'SDM_Spatial'];
+
+function drawChart(canvasId, outcome) {
+    const canvas = document.getElementById(canvasId);
+    const ctx = canvas.getContext('2d');
+    
+    // Set canvas resolution
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * 2;
+    canvas.height = rect.height * 2;
+    ctx.scale(2, 2);
+    
+    const width = rect.width;
+    const height = rect.height;
+    const margin = {top: 20, right: 20, bottom: 70, left: 70};
+    const chartWidth = width - margin.left - margin.right;
+    const chartHeight = height - margin.top - margin.bottom;
+    
+    const outcomeData = data[outcome];
+    
+    // Calculate value range
+    let allValues = [];
+    weights.forEach(weight => {
+        models.forEach(model => {
+            const value = outcomeData[weight][model];
+            if (value !== null && value !== undefined) {
+                allValues.push(value);
+            }
+        });
+    });
+    
+    const maxVal = Math.max(...allValues, 0);
+    const minVal = Math.min(...allValues, 0);
+    const range = Math.max(maxVal - minVal, Math.abs(maxVal), Math.abs(minVal));
+    const padding = range * 0.15;
+    
+    const yMax = maxVal + padding;
+    const yMin = minVal - padding;
+    
+    // Clear canvas
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, width, height);
+    
+    // Draw axes
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(margin.left, margin.top);
+    ctx.lineTo(margin.left, height - margin.bottom);
+    ctx.lineTo(width - margin.right, height - margin.bottom);
+    ctx.stroke();
+    
+    // Draw zero line
+    if (yMin < 0 && yMax > 0) {
+        const zeroY = margin.top + (yMax / (yMax - yMin)) * chartHeight;
+        ctx.strokeStyle = '#666';
+        ctx.lineWidth = 0.8;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(margin.left, zeroY);
+        ctx.lineTo(width - margin.right, zeroY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+    
+    // Draw bars
+    const groupWidth = chartWidth / models.length;
+    const barWidth = groupWidth / (weights.length + 0.5);
+    
+    models.forEach((model, modelIndex) => {
+        const groupX = margin.left + modelIndex * groupWidth;
+        
+        weights.forEach((weight, weightIndex) => {
+            const value = outcomeData[weight][model];
+            if (value !== null && value !== undefined) {
+                const barX = groupX + weightIndex * barWidth + barWidth * 0.1;
+                const barHeight = Math.abs(value) / (yMax - yMin) * chartHeight;
+                const barY = value >= 0 
+                    ? margin.top + (yMax - value) / (yMax - yMin) * chartHeight
+                    : margin.top + (yMax / (yMax - yMin)) * chartHeight;
+                
+                // Draw bar
+                ctx.fillStyle = colors[weight];
+                ctx.fillRect(barX, barY, barWidth * 0.8, barHeight);
+                
+                // Draw border
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 0.5;
+                ctx.strokeRect(barX, barY, barWidth * 0.8, barHeight);
+            }
+        });
+    });
+    
+    // Draw grid lines
+    ctx.strokeStyle = '#E0E0E0';
+    ctx.lineWidth = 0.5;
+    const numTicks = 6;
+    for (let i = 1; i < numTicks; i++) {
+        const y = margin.top + (i / numTicks) * chartHeight;
+        ctx.beginPath();
+        ctx.moveTo(margin.left, y);
+        ctx.lineTo(width - margin.right, y);
+        ctx.stroke();
+    }
+    
+    // Draw labels
+    ctx.fillStyle = '#333';
+    ctx.textAlign = 'center';
+    
+    // X-axis labels
+    ctx.font = 'bold 9px Arial';
+    models.forEach((model, index) => {
+        const x = margin.left + index * groupWidth + groupWidth / 2;
+        const label = model.replace('_', ' ');
+        ctx.fillText(label, x, height - margin.bottom + 15);
+    });
+    
+    // Y-axis labels
+    ctx.textAlign = 'right';
+    ctx.font = '9px Arial';
+    for (let i = 0; i <= numTicks; i++) {
+        const value = yMin + (yMax - yMin) * i / numTicks;
+        const y = margin.top + (1 - i / numTicks) * chartHeight;
+        
+        let label;
+        if (outcome === 'income' || outcome === 'house_price') {
+            if (Math.abs(value) >= 100000) {
+                label = (value / 1000).toFixed(0) + 'k';
+            } else if (Math.abs(value) >= 10000) {
+                label = (value / 1000).toFixed(0) + 'k';
+            } else if (Math.abs(value) >= 1000) {
+                label = (value / 1000).toFixed(1) + 'k';
+            } else {
+                label = value.toFixed(0);
+            }
+        } else {
+            label = value.toFixed(3);
+        }
+        
+        ctx.fillText(label, margin.left - 8, y + 3);
+    }
+    
+    // Y-axis title
+    ctx.save();
+    ctx.translate(15, height / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 10px Arial';
+    
+    let yAxisLabel;
+    if (outcome === 'income') yAxisLabel = 'Income Effect (£)';
+    else if (outcome === 'house_price') yAxisLabel = 'House Price Effect (£)';
+    else if (outcome === 'crime_rate') yAxisLabel = 'Crime Rate Effect';
+    else yAxisLabel = 'Mobility Effect';
+    
+    ctx.fillText(yAxisLabel, 0, 0);
+    ctx.restore();
+}
+
+// Initialize charts
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(() => {
+        drawChart('income-chart', 'income');
+        drawChart('crime-chart', 'crime_rate');
+        drawChart('house-chart', 'house_price');
+        drawChart('mobility-chart', 'mobility');
+    }, 100);
+});
+
+// Redraw on resize
+window.addEventListener('resize', function() {
+    setTimeout(() => {
+        drawChart('income-chart', 'income');
+        drawChart('crime-chart', 'crime_rate');
+        drawChart('house-chart', 'house_price');
+        drawChart('mobility-chart', 'mobility');
+    }, 100);
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>交通基础设施影响评估研究流程图</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background-color: #f8f9fa;
+            color: #333;
+        }
+        
+        .flowchart {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 30px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .title {
+            text-align: center;
+            font-size: 28px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .phase {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 18px;
+            font-weight: bold;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+            text-align: center;
+            min-width: 300px;
+        }
+        
+        .phase-1 { background: linear-gradient(135deg, #ff7e5f 0%, #feb47b 100%); }
+        .phase-2 { background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); }
+        .phase-3 { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .phase-4 { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        
+        .step-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+            max-width: 1000px;
+        }
+        
+        .step {
+            background: white;
+            border: 2px solid #e1e8ed;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            flex: 1;
+            min-width: 220px;
+            max-width: 280px;
+        }
+        
+        .step:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+            border-color: #3498db;
+        }
+        
+        .step-title {
+            font-weight: bold;
+            font-size: 16px;
+            color: #2c3e50;
+            margin-bottom: 12px;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 8px;
+        }
+        
+        .step-content {
+            font-size: 14px;
+            line-height: 1.5;
+            color: #555;
+        }
+        
+        .step-content ul {
+            margin: 8px 0;
+            padding-left: 18px;
+        }
+        
+        .step-content li {
+            margin: 4px 0;
+        }
+        
+        .arrow {
+            font-size: 30px;
+            color: #3498db;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .methods-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .method {
+            background: #ecf0f1;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            text-align: center;
+            border: 1px solid #bdc3c7;
+        }
+        
+        .output-container {
+            background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+            border-radius: 15px;
+            padding: 25px;
+            margin-top: 20px;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+        }
+        
+        .output-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #d35400;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .output-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .output-item {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            border-left: 4px solid #e74c3c;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .highlight {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 8px;
+            margin: 8px 0;
+            font-weight: bold;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="flowchart">
+        <div class="title">交通基础设施影响评估研究流程图</div>
+        
+        <!-- 第一阶段 -->
+        <div class="phase phase-1">第一阶段：数据预处理与整合 (代码1)</div>
+        <div class="step-container">
+            <div class="step">
+                <div class="step-title">1.1 多源数据读取</div>
+                <div class="step-content">
+                    <ul>
+                        <li>收入数据 (2011-2019, MSOA级)</li>
+                        <li>人口、房价、IMD、失业率</li>
+                        <li>数据格式统一化处理</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-title">1.2 时间序列插值</div>
+                <div class="step-content">
+                    <ul>
+                        <li>线性插值填补缺失年份</li>
+                        <li>LOCF前向填充</li>
+                        <li>4种方法敏感性测试</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-title">1.3 混合效应建模</div>
+                <div class="step-content">
+                    <div class="highlight">MSOA→LSOA下采样</div>
+                    <ul>
+                        <li>lmer(income ~ 房价+人口+IMD+就业率+(1|MSOA))</li>
+                        <li>一致性约束调整</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-title">1.4 空间处理组识别</div>
+                <div class="step-content">
+                    <ul>
+                        <li>NLE: 960m→1500m缓冲区</li>
+                        <li>BRE: 类似缓冲区分析</li>
+                        <li>面积重叠阈值筛选</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <div class="arrow">↓</div>
+        
+        <!-- 第二阶段 -->
+        <div class="phase phase-2">第二阶段：准实验设计 (代码2)</div>
+        <div class="step-container">
+            <div class="step">
+                <div class="step-title">2.1 辅助数据整合</div>
+                <div class="step-content">
+                    <ul>
+                        <li>PTAL数据 (2005-2023)</li>
+                        <li>人口流动性数据</li>
+                        <li>犯罪率统计</li>
+                        <li>车站位置数据</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-title">2.2 倾向得分匹配</div>
+                <div class="step-content">
+                    <div class="highlight">选择对照组</div>
+                    <ul>
+                        <li>距离约束: 2-5km</li>
+                        <li>匹配变量: PTAL+IMD+人口+趋势</li>
+                        <li>自适应匹配比例</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-title">2.3 平行趋势检验</div>
+                <div class="step-content">
+                    <ul>
+                        <li>干预前趋势差异检验</li>
+                        <li>PTAL差异 < 0.5</li>
+                        <li>IMD差异 < 5</li>
+                        <li>学术级可视化</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-title">2.4 匹配质量评估</div>
+                <div class="step-content">
+                    <ul>
+                        <li>标准化均值差异(SMD)</li>
+                        <li>协变量平衡性检验</li>
+                        <li>小样本特殊处理</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <div class="arrow">↓</div>
+        
+        <!-- 第三阶段 -->
+        <div class="phase phase-3">第三阶段：因果效应估计 (代码3)</div>
+        <div class="step-container">
+            <div class="step">
+                <div class="step-title">3.1 面板数据构建</div>
+                <div class="step-content">
+                    <ul>
+                        <li>DID结构: post, did, time_to_intervention</li>
+                        <li>4个结果变量整合</li>
+                        <li>预处理趋势验证</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-title">3.2 空间权重矩阵</div>
+                <div class="step-content">
+                    <ul>
+                        <li>K近邻权重 (k=5,10,15)</li>
+                        <li>距离阈值权重</li>
+                        <li>反距离加权矩阵</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-title">3.3 多重估计方法</div>
+                <div class="step-content">
+                    <div class="highlight">11种方法收敛性验证</div>
+                    <div class="methods-grid">
+                        <div class="method">标准DiD</div>
+                        <div class="method">IPW-DiD</div>
+                        <div class="method">空间滞后(SLM)</div>
+                        <div class="method">空间误差(SEM)</div>
+                        <div class="method">事件研究</div>
+                        <div class="method">合成控制</div>
+                        <div class="method">双稳健DiD</div>
+                        <div class="method">Bootstrap</div>
+                        <div class="method">异质性分析</div>
+                        <div class="method">面板匹配</div>
+                        <div class="method">排除COVID</div>
+                    </div>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-title">3.4 稳健性检验</div>
+                <div class="step-content">
+                    <ul>
+                        <li>方法收敛性对比</li>
+                        <li>小样本适应性设计</li>
+                        <li>置信区间构建</li>
+                        <li>统计推断验证</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <div class="arrow">↓</div>
+        
+        <!-- 第四阶段 -->
+        <div class="phase phase-4">第四阶段：结果可视化与政策评估 (代码4)</div>
+        <div class="step-container">
+            <div class="step">
+                <div class="step-title">4.1 数据质量检验</div>
+                <div class="step-content">
+                    <ul>
+                        <li>方法收敛性诊断</li>
+                        <li>缺失值统计分析</li>
+                        <li>描述性统计汇总</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-title">4.2 绅士化指数构建</div>
+                <div class="step-content">
+                    <div class="highlight">多维动态指数</div>
+                    <ul>
+                        <li>收入变化(30%) + 房价变化(30%)</li>
+                        <li>人口流动性(25%) + 犯罪改善(15%)</li>
+                        <li>自适应标准化方法</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-title">4.3 空间可视化制图</div>
+                <div class="step-content">
+                    <ul>
+                        <li>学术级热力图制作</li>
+                        <li>车站位置标注</li>
+                        <li>指北针+比例尺</li>
+                        <li>高分辨率输出</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-title">4.4 政策效应对比</div>
+                <div class="step-content">
+                    <ul>
+                        <li>NLE vs BRE效应差异</li>
+                        <li>4×2×11方法矩阵</li>
+                        <li>学术发表级图表</li>
+                        <li>政策建议生成</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 核心输出 -->
+        <div class="output-container">
+            <div class="output-title">🎯 研究核心输出</div>
+            <div class="output-grid">
+                <div class="output-item">
+                    <strong>因果效应估计</strong><br>
+                    4个结果变量 × 2个项目 × 11种方法 = 88个估计结果
+                </div>
+                <div class="output-item">
+                    <strong>绅士化评估</strong><br>
+                    动态多维指数 + 空间分布图 + 分级评估
+                </div>
+                <div class="output-item">
+                    <strong>学术成果</strong><br>
+                    发表级图表 + 数据表格 + 稳健性报告
+                </div>
+                <div class="output-item">
+                    <strong>政策建议</strong><br>
+                    交通项目社会经济影响评估 + 绅士化缓解策略
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
