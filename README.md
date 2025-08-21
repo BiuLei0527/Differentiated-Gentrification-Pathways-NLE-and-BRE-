@@ -3,8 +3,7 @@
 
 <div align="center">
 
-[TfL Logo](images/tfl_logo.png) &nbsp;&nbsp;&nbsp;&nbsp; 
-![CASA Logo](images/casa_logo.png)
+![TfL Logo](images/tfl_logo.png) &nbsp;&nbsp;&nbsp;&nbsp; ![CASA Logo](images/casa_logo.jpg)
 
 </div>
 
